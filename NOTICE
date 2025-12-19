@@ -1,0 +1,101 @@
+# NOTICES AND INFORMATION
+
+This project incorporates components from the projects listed below. The original copyright notices and the licenses under which Microsoft received such components are set forth below. Microsoft reserves all rights not expressly granted herein, whether by implication, estoppel or otherwise.
+
+---
+
+## Third-Party Software Notices and Information
+
+### 1. jose-jwt (5.0.0)
+
+**License**: MIT License
+
+**Copyright**: Copyright (c) 2014 Dmitry Vsekhvalnov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+**Project URL**: https://github.com/dvsekhvalnov/jose-jwt
+
+---
+
+### 2. Polly (8.5.0)
+
+**License**: BSD 3-Clause License
+
+**Copyright**: Copyright (c) 2015-2024, App vNext
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+**Project URL**: https://github.com/App-vNext/Polly
+
+---
+
+## Microsoft Packages
+
+This project uses the following packages from Microsoft, which are covered by their respective licenses:
+
+- Azure.Identity (1.13.1)
+- Azure.Security.KeyVault.Secrets (4.7.0)
+- Azure.Storage.Blobs (12.22.2)
+- Azure.Storage.Queues (12.20.1)
+- Microsoft.ApplicationInsights (2.22.0)
+- Microsoft.ApplicationInsights.WorkerService (2.22.0)
+- Microsoft.Azure.Functions.Worker (1.23.0)
+- Microsoft.Azure.Functions.Worker.Extensions.Http (3.2.0)
+- Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore (1.3.2)
+- Microsoft.Azure.Functions.Worker.Sdk (1.18.1)
+- Microsoft.Extensions.* (various versions 8.0.x)
+- Microsoft.Graph (5.72.0)
+- System.Text.Json (8.0.5)
+
+These packages are subject to their respective license terms as provided by Microsoft.
+
+---
+
+## Additional Information
+
+For a complete list of dependencies and their licenses, please refer to the project files:
+- src/B2CMigrationKit.Core/B2CMigrationKit.Core.csproj
+- src/B2CMigrationKit.Console/B2CMigrationKit.Console.csproj
+- src/B2CMigrationKit.Function/B2CMigrationKit.Function.csproj
+
+This NOTICES file is provided for informational purposes and does not modify the MIT License terms under which this project is distributed.
