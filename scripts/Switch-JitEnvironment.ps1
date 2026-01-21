@@ -41,12 +41,13 @@ if ($Environment -eq "Local") {
     $identifierUri = "api://$NgrokDomain/$LocalAppId"
 } else {
     # Extract function app name from URL for Azure environment
-    $functionAppName = if ($AzureFunctionUrl -match "https://([^.]+)") { $matches[1] } else { "your-function-app" }
+    $functionHost = if ($AzureFunctionUrl -match "https://([^/]+)") { $matches[1] } else { "your-function-app" }
+
     $targetUrl = "$AzureFunctionUrl/api/JitAuthentication"
-    $resourceId = "api://$functionAppName.azurewebsites.net/$AzureAppId"
+    $resourceId = "api://$functionHost/$AzureAppId"
     $appObjectId = $AzureAppObjectId
     $appId = $AzureAppId
-    $identifierUri = "api://$functionAppName.azurewebsites.net/$AzureAppId"
+    $identifierUri = "api://$functionHost/$AzureAppId"
 }
 
 Write-Info "Target Configuration:"
