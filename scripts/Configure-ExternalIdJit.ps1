@@ -417,9 +417,9 @@ Write-Info "Configuring encryption key on app registration..."
 $keyCredentialsBody = @{
     keyCredentials = @(
         @{
-            endDateTime = $cert.NotAfter.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            endDateTime = $cert.NotAfter.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             keyId = $keyGuid
-            startDateTime = $cert.NotBefore.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            startDateTime = $cert.NotBefore.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
             type = "AsymmetricX509Cert"
             usage = "Encrypt"
             key = $certBase64
