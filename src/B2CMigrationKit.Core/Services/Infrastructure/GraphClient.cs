@@ -5,11 +5,13 @@ using B2CMigrationKit.Core.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.Graph.Users;
+using Microsoft.Graph.Models;
 using Polly;
 using Polly.Retry;
 using System.Net;
-using GraphModels = Microsoft.Graph.Models;
 using CoreModels = B2CMigrationKit.Core.Models;
+using GraphModels = Microsoft.Graph.Models;
 
 namespace B2CMigrationKit.Core.Services.Infrastructure;
 
@@ -60,46 +62,36 @@ public class GraphClient : IGraphClient
     }
 
     public async Task<CoreModels.PagedResult<CoreModels.UserProfile>> GetUsersAsync(
-        int pageSize = 100,
-        string? select = null,
-        string? filter = null,
-        string? skipToken = null,
-        CancellationToken cancellationToken = default)
-    {
-        return await _retryPipeline.ExecuteAsync(async ct =>
-        {
-            var request = _client.Users.GetAsync(config =>
-            {
-                config.QueryParameters.Top = pageSize;
-                config.QueryParameters.Count = true;
-
-                if (!string.IsNullOrEmpty(select))
-                {
-                    config.QueryParameters.Select = select.Split(',');
-                }
-
-                if (!string.IsNullOrEmpty(filter))
-                {
-                    config.QueryParameters.Filter = filter;
-                }
-
-                // Skip token is handled via OData next link
-                // Graph SDK 5.x handles continuation automatically
-            }, ct);
-
-            var response = await request;
-
-            var users = response?.Value?.Select(MapToUserProfile).ToList() ?? new List<CoreModels.UserProfile>();
-            var nextPageToken = response?.OdataNextLink != null
-                ? ExtractSkipToken(response.OdataNextLink)
-                : null;
-
+            int pageSize = 100,
+            string? select = null,
+            string? filter = null,
+            string? skipToken = null,
+            CancellationToken cancellationToken = default) {
+        return await _retryPipeline.ExecuteAsync(async ct => {
+            UserCollectionResponse? response;
+            if (skipToken is null) {
+                // First page
+                response = await _client.Users.GetAsync(config => {
+                    config.QueryParameters.Top = pageSize;
+                    config.QueryParameters.Count = true;
+                    if (!string.IsNullOrEmpty(select)) {
+                        config.QueryParameters.Select = select.Split(',');
+                    }
+                    if (!string.IsNullOrEmpty(filter)) {
+                        config.QueryParameters.Filter = filter;
+                    }
+                }, ct);
+            } else {
+                // Next pages
+                var builder = new UsersRequestBuilder(skipToken, _client.RequestAdapter);
+                response = await builder.GetAsync(cancellationToken: ct);
+            }
+            var users = response?.Value?.Select(MapToUserProfile).ToList()
+                ?? new List<CoreModels.UserProfile>();
             _telemetry.IncrementCounter("GraphClient.GetUsers", users.Count);
-
-            return new CoreModels.PagedResult<CoreModels.UserProfile>
-            {
+            return new CoreModels.PagedResult<CoreModels.UserProfile> {
                 Items = users,
-                NextPageToken = nextPageToken
+                NextPageToken = response?.OdataNextLink
             };
         }, cancellationToken);
     }
