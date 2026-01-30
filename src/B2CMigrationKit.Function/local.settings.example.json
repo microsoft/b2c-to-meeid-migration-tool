@@ -29,7 +29,7 @@
     "Migration__JitAuthentication__UseKeyVault": "false",
     "Migration__JitAuthentication__TestMode": "false",
     "Migration__JitAuthentication__RsaKeyName": "JIT-RSA-PrivateKey",
-    "Migration__JitAuthentication__MigrationAttributeName": "RequireMigration",
+    "Migration__JitAuthentication__MigrationAttributeName": "RequiresMigration",
     "Migration__JitAuthentication__InlineRsaPrivateKey": "-----BEGIN PRIVATE KEY-----\nYOUR_RSA_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----",
     "Migration__JitAuthentication__CachePrivateKey": "true",
     "Migration__JitAuthentication__TimeoutSeconds": "1.5",

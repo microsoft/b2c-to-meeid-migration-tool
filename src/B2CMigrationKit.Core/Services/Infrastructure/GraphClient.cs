@@ -68,31 +68,50 @@ public class GraphClient : IGraphClient
     {
         return await _retryPipeline.ExecuteAsync(async ct =>
         {
-            var request = _client.Users.GetAsync(config =>
+            GraphModels.UserCollectionResponse? response;
+
+            // If we have a nextLink (full URL), use it directly for pagination
+            if (!string.IsNullOrEmpty(skipToken) && skipToken.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
-                config.QueryParameters.Top = pageSize;
-                config.QueryParameters.Count = true;
-
-                if (!string.IsNullOrEmpty(select))
+                // Use the full OData nextLink URL for pagination
+                var requestInfo = new Microsoft.Kiota.Abstractions.RequestInformation
                 {
-                    config.QueryParameters.Select = select.Split(',');
-                }
-
-                if (!string.IsNullOrEmpty(filter))
+                    HttpMethod = Microsoft.Kiota.Abstractions.Method.GET,
+                    URI = new Uri(skipToken)
+                };
+                requestInfo.Headers.Add("ConsistencyLevel", "eventual");
+                
+                response = await _client.RequestAdapter.SendAsync(
+                    requestInfo, 
+                    GraphModels.UserCollectionResponse.CreateFromDiscriminatorValue, 
+                    cancellationToken: ct);
+            }
+            else
+            {
+                // First page request - build query parameters
+                response = await _client.Users.GetAsync(config =>
                 {
-                    config.QueryParameters.Filter = filter;
-                }
+                    config.QueryParameters.Top = pageSize;
+                    config.QueryParameters.Count = true;
 
-                // Skip token is handled via OData next link
-                // Graph SDK 5.x handles continuation automatically
-            }, ct);
+                    if (!string.IsNullOrEmpty(select))
+                    {
+                        config.QueryParameters.Select = select.Split(',');
+                    }
 
-            var response = await request;
+                    if (!string.IsNullOrEmpty(filter))
+                    {
+                        config.QueryParameters.Filter = filter;
+                    }
+
+                    config.Headers.Add("ConsistencyLevel", "eventual");
+                }, ct);
+            }
 
             var users = response?.Value?.Select(MapToUserProfile).ToList() ?? new List<CoreModels.UserProfile>();
-            var nextPageToken = response?.OdataNextLink != null
-                ? ExtractSkipToken(response.OdataNextLink)
-                : null;
+            
+            // Return the full nextLink URL as the token for next page
+            var nextPageToken = response?.OdataNextLink;
 
             _telemetry.IncrementCounter("GraphClient.GetUsers", users.Count);
 
@@ -376,20 +395,5 @@ public class GraphClient : IGraphClient
         }
 
         return user;
-    }
-
-    private string? ExtractSkipToken(string nextLink)
-    {
-        // Extract $skiptoken from the URL
-        var tokenParam = "$skiptoken=";
-        var tokenIndex = nextLink.IndexOf(tokenParam, StringComparison.OrdinalIgnoreCase);
-        if (tokenIndex == -1) return null;
-
-        var tokenStart = tokenIndex + tokenParam.Length;
-        var tokenEnd = nextLink.IndexOf('&', tokenStart);
-
-        return tokenEnd == -1
-            ? Uri.UnescapeDataString(nextLink.Substring(tokenStart))
-            : Uri.UnescapeDataString(nextLink.Substring(tokenStart, tokenEnd - tokenStart));
     }
 }
