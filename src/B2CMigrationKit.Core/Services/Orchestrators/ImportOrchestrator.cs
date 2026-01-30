@@ -417,7 +417,7 @@ public class ImportOrchestrator : IOrchestrator<ExecutionResult>
         // Default: extension_{appId}_RequireMigration
         return MigrationExtensionAttributes.GetFullAttributeName(
             _options.ExternalId.ExtensionAppId,
-            MigrationExtensionAttributes.RequireMigration);
+            MigrationExtensionAttributes.RequiresMigration);
     }
 
     private ImportAuditLog CreateAuditLog(

@@ -179,10 +179,18 @@ function Invoke-GraphRequest {
     }
     catch {
         Write-ErrorMsg "Graph API request failed: $($_.Exception.Message)"
-        if ($_.Exception.Response) {
-            $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
-            $responseBody = $reader.ReadToEnd()
-            Write-Host "Response: $responseBody" -ForegroundColor Red
+        # PowerShell 7.x compatible error handling
+        if ($_.ErrorDetails.Message) {
+            try {
+                $errorJson = $_.ErrorDetails.Message | ConvertFrom-Json
+                if ($errorJson.error) {
+                    Write-Host "Error Code: $($errorJson.error.code)" -ForegroundColor Red
+                    Write-Host "Error Message: $($errorJson.error.message)" -ForegroundColor Red
+                }
+            }
+            catch {
+                Write-Host "Response: $($_.ErrorDetails.Message)" -ForegroundColor Red
+            }
         }
         throw
     }
@@ -330,6 +338,35 @@ if ($existingApps.value.Count -gt 0) {
     Write-Warning "App registration already exists"
     $app = $existingApps.value[0]
     Write-Step "Using existing app: $($app.appId)"
+    
+    # Ensure required permissions are configured on existing app
+    Write-Info "Verifying API permissions on existing app..."
+    $requiredResourceAccess = @(
+        @{
+            resourceAppId = "00000003-0000-0000-c000-000000000000"  # Microsoft Graph
+            resourceAccess = @(
+                @{
+                    id = "214e810f-fda8-4fd7-a475-29461495eb00"  # CustomAuthenticationExtension.Receive.Payload
+                    type = "Role"
+                }
+            )
+        }
+    )
+    
+    $updatePermissionsBody = @{
+        requiredResourceAccess = $requiredResourceAccess
+    }
+    
+    try {
+        Invoke-GraphRequest -Method PATCH `
+            -Uri "https://graph.microsoft.com/v1.0/applications/$($app.id)" `
+            -Body $updatePermissionsBody `
+            -AccessToken $accessToken
+        Write-Success "API permissions verified/updated"
+    }
+    catch {
+        Write-Warning "Could not update API permissions. Please verify manually."
+    }
 } else {
     # Create new app registration
     $appBody = @{
