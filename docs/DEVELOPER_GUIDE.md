@@ -261,11 +261,18 @@ The toolkit supports dual telemetry output: console logging (local development) 
    ```
 
 2. **Configure Local Settings**
+   
+   > **Important:** For local development without Key Vault, use `appsettings.local.example.json` as your template (not `appsettings.json`). The local example uses `ClientSecret` with direct secret values, while `appsettings.json` uses `ClientSecretName` which requires Key Vault.
+   
    ```bash
    cd src/B2CMigrationKit.Console
-   cp appsettings.json appsettings.Development.json
+   cp appsettings.local.example.json appsettings.Development.json
    # Edit appsettings.Development.json with your settings
    ```
+   
+   **Configuration patterns:**
+   - **Local development (no Key Vault):** Use `ClientSecret` with the actual secret value
+   - **Production (with Key Vault):** Use `ClientSecretName` with the Key Vault secret name
 
 3. **Run Export Locally**
    ```powershell
@@ -347,7 +354,7 @@ During the bulk import phase, `ImportOrchestrator` generates **unique 16-charact
 │  External ID User Created With:                                 │
 │  - Username: user@domain.com                                    │
 │  - Password: "xK9#mP2qL8@vN4tR" (NOT the real B2C password)     │
-│  - RequireMigration: true                                       │
+│  - RequiresMigration: true                                      │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -358,7 +365,7 @@ During the bulk import phase, `ImportOrchestrator` generates **unique 16-charact
 │  External ID compares:                                          │
 │  "MyRealPassword123!" ≠ "xK9#mP2qL8@vN4tR" → MISMATCH           │
 │                                                                 │
-│  AND RequireMigration == true → JIT TRIGGERS                     │
+│  AND RequiresMigration == true → JIT TRIGGERS                    │
 │                                                                 │
 │  Custom Extension Called:                                       │
 │  1. Validates "MyRealPassword123!" against B2C ROPC ✓           │
@@ -424,7 +431,7 @@ private string GenerateRandomPassword()
 
 ---
 
-#### Local Development Setup
+#### JIT Function Local Setup
 
 **Step 1: Generate RSA Key Pair (5 minutes)**
 
@@ -920,7 +927,7 @@ http://localhost:4040
 # Verify user has random password (not real B2C password)
 Get-MgUser -UserId "user@domain.com" | Select-Object PasswordProfile
 
-# Check RequireMigration status
+# Check RequiresMigration status
 Get-MgUser -UserId "user@domain.com" -Property "extension_*" | 
     Select-Object -ExpandProperty AdditionalProperties
 
@@ -1065,7 +1072,7 @@ Both Azure AD B2C and Entra External ID use the same Microsoft Graph User object
 
 1. **Map custom extension attributes** with different names between tenants
 2. **Exclude certain fields** from being copied
-3. **Configure migration-specific attributes** (B2CObjectId, RequireMigration)
+3. **Configure migration-specific attributes** (B2CObjectId, RequiresMigration)
 
 ### Configuration Structure
 

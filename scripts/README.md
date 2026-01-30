@@ -198,7 +198,7 @@ Automates complete External ID configuration for JIT migration using device code
 3. Custom Authentication Extension (links to your Azure Function)
 4. Test Client Application (for testing sign-in flows)
 5. Service Principal (required for Event Listener)
-6. Extension Attribute (`RequireMigration` boolean)
+6. Extension Attribute (`RequiresMigration` boolean)
 7. Event Listener Policy (triggers JIT on password submission)
 8. User Flow (enables sign-up/sign-in with JIT)
 
@@ -209,17 +209,15 @@ Automates complete External ID configuration for JIT migration using device code
     -TenantId "your-external-id-tenant-id" `
     -CertificatePath ".\jit-certificate.txt" `
     -FunctionUrl "https://your-function.azurewebsites.net/api/JitAuthentication" `
-    -ExtensionAppObjectId "b2c-extensions-app-object-id" `
-    -MigrationAttributeName "RequireMigration"
+    -MigrationPropertyId "extension_{ExtensionAppId}_RequiresMigration"
 
 # For local testing with ngrok
 .\Configure-ExternalIdJit.ps1 `
     -TenantId "your-external-id-tenant-id" `
     -CertificatePath ".\jit-certificate.txt" `
     -FunctionUrl "https://your-domain.ngrok-free.dev/api/JitAuthentication" `
-    -ExtensionAppObjectId "your-b2c-extensions-app-object-id" `
-    -MigrationAttributeName "RequireMigration" `
-    -UseUniqueNames
+    -MigrationPropertyId "extension_{ExtensionAppId}_RequiresMigration" `
+    -SkipClientApp
 ```
 
 **Parameters:**
@@ -229,15 +227,17 @@ Automates complete External ID configuration for JIT migration using device code
 | `TenantId` | Yes | External ID tenant ID |
 | `CertificatePath` | Yes | Path to `jit-certificate.txt` file |
 | `FunctionUrl` | Yes | Azure Function endpoint URL |
-| `ExtensionAppObjectId` | Yes | b2c-extensions-app Object ID |
-| `MigrationAttributeName` | No | Extension attribute name (default: "RequireMigration") |
-| `UseUniqueNames` | No | Generate unique app names (useful for testing multiple configs) |
+| `MigrationPropertyId` | No | Extension attribute ID (format: `extension_{AppId}_RequiresMigration`). Prompted if not provided. |
+| `ExtensionAppName` | No | Name for custom auth extension app (default: "EEID Auth Extension - JIT Migration") |
+| `ClientAppName` | No | Name for test client app (default: "JIT Migration Test Client") |
+| `SkipClientApp` | No | Skip creating the test client application |
 
-**How to find b2c-extensions-app Object ID:**
-1. Azure Portal → Your External ID Tenant
-2. App registrations → All applications
-3. Search for: `b2c-extensions-app`
-4. Copy the **Object ID** (NOT the Application ID)
+**How to find Migration Property ID:**
+1. Azure Portal → Your B2C Tenant → App registrations
+2. Find your `b2c-extensions-app` and copy the **Application (client) ID**
+3. Remove dashes from the ID (e.g., `a1b2c3d4-...` → `a1b2c3d4...`)
+4. Format: `extension_{AppIdWithoutDashes}_RequiresMigration`
+5. Example: `extension_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6_RequiresMigration`
 
 **Authentication Flow:**
 1. Script opens device code login (`https://microsoft.com/devicelogin`)
@@ -271,7 +271,7 @@ Test Client App:
   → App ID: 00000000-0000-0000-0000-000000000003
 
 Event Listener:
-  → Migration Property: extension_00000000000000000000000000000001_RequireMigration
+  → Migration Property: extension_00000000000000000000000000000001_RequiresMigration
 
 User Flow:
   → Display Name: JIT Migration Flow (20251219-123721)
@@ -443,8 +443,7 @@ Complete local development workflow:
     -TenantId "your-tenant-id" `
     -CertificatePath ".\jit-certificate.txt" `
     -FunctionUrl "https://your-ngrok.ngrok-free.dev/api/JitAuthentication" `
-    -ExtensionAppObjectId "your-extensions-app-id" `
-    -UseUniqueNames
+    -MigrationPropertyId "extension_{ExtensionAppId}_RequiresMigration"
 
 # 6. Test JIT (use Portal → User flows → Run user flow)
 

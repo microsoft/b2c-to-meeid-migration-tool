@@ -28,7 +28,7 @@ public class ImportOptions
 }
 
 /// <summary>
-/// Configuration for migration-specific attributes (B2CObjectId, RequireMigration).
+/// Configuration for migration-specific attributes (B2CObjectId, RequiresMigration).
 /// </summary>
 public class MigrationAttributesOptions
 {
@@ -46,15 +46,15 @@ public class MigrationAttributesOptions
     public string? B2CObjectIdTarget { get; set; }
 
     /// <summary>
-    /// Gets or sets whether to set the RequireMigration flag in External ID.
+    /// Gets or sets whether to set the RequiresMigration flag in External ID.
     /// Default: true.
     /// </summary>
     public bool SetRequireMigration { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the target attribute name for the RequireMigration flag.
+    /// Gets or sets the target attribute name for the RequiresMigration flag.
     /// Only used if SetRequireMigration is true.
-    /// Default: "extension_{ExtensionAppId}_RequireMigration"
+    /// Default: "extension_{ExtensionAppId}_RequiresMigration"
     /// </summary>
     public string? RequireMigrationTarget { get; set; }
 

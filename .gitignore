@@ -231,3 +231,6 @@ FodyWeavers.xsd
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+# Development configs with secrets
+**/appsettings.Development.json

@@ -358,7 +358,7 @@ To overcome per-app rate limits (~60 reads/sec), deploy **2-3 app registrations*
 - **Chunked Reading**: Stream large JSON files without loading entire file in memory
 - **Batch Requests**: Combine 50-100 user creations in single Graph API call
 - **UPN Domain Transformation**: Replace B2C domain with External ID domain (reversed during JIT)
-- **Extended Attributes**: Set `B2CObjectId` and `RequireMigration` custom attributes
+- **Extended Attributes**: Set `B2CObjectId` and `RequiresMigration` custom attributes
 - **Placeholder Passwords**: Generate random strong passwords (users can't login until JIT)
 - **Verification**: Post-import user count validation
 
@@ -393,7 +393,7 @@ To overcome per-app rate limits (~60 reads/sec), deploy **2-3 app registrations*
 ┌─────────────────────────────────────────────────────────────────┐
 │ 4. Set Custom Attributes                                        │
 │    - extension_{ExtensionAppId}_B2CObjectId = <B2C GUID>        │
-│    - extension_{ExtensionAppId}_RequireMigration = true         │
+│    - extension_{ExtensionAppId}_RequiresMigration = true        │
 │    (true because password NOT yet migrated)                     │
 └────────────┬────────────────────────────────────────────────────┘
              │
@@ -467,15 +467,15 @@ Similar to export, use **3-5 app registrations** to boost throughput:
 JIT migration enables **seamless password validation** during first login to External ID, eliminating the need for users to reset passwords.
 
 **Key Concept**: When a user logs in to External ID for the first time:
-1. External ID checks `RequireMigration` custom attribute
-2. If `RequireMigration = true` (not yet migrated), trigger Custom Authentication Extension
+1. External ID checks `RequiresMigration` custom attribute
+2. If `RequiresMigration = true` (not yet migrated), trigger Custom Authentication Extension
 3. Extension calls Azure Function with encrypted password and user's UPN
 4. Function **reverses the UPN domain transformation** (External ID domain → B2C domain)
    - External ID UPN: `user@externalid.onmicrosoft.com`
    - Extracts local part: `user` (preserved from import)
    - Reconstructs B2C UPN: `user@b2c.onmicrosoft.com`
 5. Function validates password against B2C via ROPC using the reconstructed B2C UPN
-6. If valid, External ID sets the password and marks `RequireMigration = false`
+6. If valid, External ID sets the password and marks `RequiresMigration = false`
 7. Subsequent logins skip JIT flow (authenticate directly with External ID)
 
 **Critical UPN Flow**:
@@ -496,7 +496,7 @@ JIT Phase:     External ID UPN (user@externalid.com) → Reverse Transform → B
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │ User Sign-In Flow                                            │ │
 │  │ 1. User submits UPN + Password                               │ │
-│  │ 2. Check RequireMigration attribute                          │ │
+│  │ 2. Check RequiresMigration attribute                         │ │
 │  │ 3. If true → Trigger OnPasswordSubmit listener               │ │
 │  └──────────────────────────┬───────────────────────────────────┘ │
 │                             │                                      │
@@ -551,7 +551,7 @@ JIT Phase:     External ID UPN (user@externalid.com) → Reverse Transform → B
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │ If MigratePassword:                                          │ │
 │  │ - Set user's password to submitted value                     │ │
-│  │ - Set RequireMigration = false (mark as migrated)            │ │
+│  │ - Set RequiresMigration = false (mark as migrated)           │ │
 │  │ - Complete authentication flow                               │ │
 │  │ - Issue tokens to application                                │ │
 │  └──────────────────────────────────────────────────────────────┘ │

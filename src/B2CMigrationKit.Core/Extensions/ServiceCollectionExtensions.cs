@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
         services.Configure<StorageOptions>(configuration.GetSection($"{MigrationOptions.SectionName}:Storage"));
         services.Configure<RetryOptions>(configuration.GetSection($"{MigrationOptions.SectionName}:Retry"));
         services.Configure<TelemetryOptions>(configuration.GetSection($"{MigrationOptions.SectionName}:Telemetry"));
+        services.Configure<KeyVaultOptions>(configuration.GetSection($"{MigrationOptions.SectionName}:KeyVault"));
 
         // Register Application Insights (if configured)
         var telemetryOptions = configuration.GetSection($"{MigrationOptions.SectionName}:Telemetry").Get<TelemetryOptions>();

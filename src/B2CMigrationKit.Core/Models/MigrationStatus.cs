@@ -46,11 +46,11 @@ public static class MigrationExtensionAttributes
 
     /// <summary>
     /// Extension attribute name for indicating if user requires JIT migration.
-    /// Format: extension_{appId}_RequireMigration
+    /// Format: extension_{appId}_RequiresMigration
     /// Note: The semantic meaning is configurable in JitAuthenticationOptions.MigrationAttributeName
     /// Default behavior: true = requires migration, false = already migrated
     /// </summary>
-    public const string RequireMigration = "RequireMigration";
+    public const string RequiresMigration = "RequiresMigration";
 
     /// <summary>
     /// Extension attribute name for storing migration timestamp.
