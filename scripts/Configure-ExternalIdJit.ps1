@@ -340,7 +340,7 @@ if ($existingApps.value.Count -gt 0) {
                 resourceAppId = "00000003-0000-0000-c000-000000000000"  # Microsoft Graph
                 resourceAccess = @(
                     @{
-                        id = "214e68ed-7c8c-4ff7-a56c-6e60ae86e8cf"  # CustomAuthenticationExtension.Receive.Payload
+                        id = "214e810f-fda8-4fd7-a475-29461495eb00"  # CustomAuthenticationExtension.Receive.Payload
                         type = "Role"
                     }
                 )
