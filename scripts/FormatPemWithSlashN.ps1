@@ -6,7 +6,13 @@
 # becomes a single-line string suitable for JSON values.
 
 # Path to the PEM file containing the private key
-$pemPath = ".\jit-private-key.pem"  # Change this to your actual PEM file path
+# To specify a different file:
+# .\FormatPemWithSlashN.ps1 -PemPath "C:\path\my-private-key.pem"
+
+param(
+[Parameter(Mandatory = $false)]
+[string]$PemPath = ".\jit-private-key.pem"
+)
 
 # Read the entire PEM file as a single string (preserves original line endings)
 $pem = Get-Content $pemPath -Raw

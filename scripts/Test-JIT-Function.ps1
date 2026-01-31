@@ -2,9 +2,24 @@
 
 # Developer Guide: Step 5: Test JIT Flow: Test with HTTP Client:
 
+# Usage:
+# .\Test-JIT-Function.ps1 -NgrokUrl "https://your-ngrok-url.ngrok.app" -TestPassword "YourPassword123!"
+
+#.\Test-JIT-Function.ps1 -NgrokUrl "https://your-ngrok-url.ngrok.app" -TestPassword "YourPassword123!" -TestUserPrincipalName "test@example.com"
+ 
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$NgrokUrl,
+
+    [Parameter(Mandatory = $true)]
+    [string]$TestPassword,
+
+    [Parameter(Mandatory = $false)]
+    [string]$TestUserPrincipalName = "testuser@yourdomain.com"
+)
+
 # Configuration
-$ngrokUrl = "https://96dcf877ef56.ngrok-free.app"  # Change to your actual ngrok domain
-$endpoint = "$ngrokUrl/api/JitAuthentication"
+$endpoint = "$NgrokUrl/api/JitAuthentication"
 
 # Test payload matching External ID Custom Authentication Extension format
 $payload = @{
@@ -14,11 +29,11 @@ $payload = @{
             correlationId = "test-12345"
             user = @{
                 id = "user-object-id-from-external-id"
-                userPrincipalName = "testuser@yourdomain.com"
+                userPrincipalName = $TestUserPrincipalName
             }
         }
         passwordContext = @{
-            userPassword = "RealB2CPassword123!"
+            userPassword = $TestPassword
             nonce = "1234567890"
         }
     }
