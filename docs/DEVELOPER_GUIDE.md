@@ -757,6 +757,11 @@ Content-Type: application/json
     }
   }
 }
+
+There is a utility script to test this in the \scripts directory:
+
+.\Test-JIT-Function.ps1
+
 ```
 
 **Expected Response (TestMode=true):**
@@ -1019,6 +1024,13 @@ az functionapp config appsettings set `
     }
   }
 }
+
+You cannot paste the private key as it is not JSON compliant. You need to convert the key
+to a string delimited by "\n".
+
+There is a utility in the \scripts directory to do this:
+
+.\FormatPemWithSlashN
 ```
 
 > **Note**: Production configuration will be documented in v2.0 with automated deployment templates.

@@ -85,24 +85,33 @@ $eBase64Url = ConvertTo-Base64Url $publicKeyParams.Exponent
 # Generate unique key ID
 $kid = [Guid]::NewGuid().ToString()
 
-# Create self-signed certificate for Graph API (valid for 2 years)
+# Create self-signed certificate using the SAME RSA key pair
 Write-Host "Generating self-signed certificate..." -ForegroundColor Cyan
-$cert = New-SelfSignedCertificate `
-    -Subject "CN=JIT Migration Local Test" `
-    -KeyAlgorithm RSA `
-    -KeyLength 2048 `
-    -NotAfter (Get-Date).AddYears(2) `
-    -CertStoreLocation "Cert:\CurrentUser\My" `
-    -KeyExportPolicy Exportable `
-    -KeyUsage KeyEncipherment, DataEncipherment `
-    -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")
 
-# Export certificate to file (DER format)
+# Create certificate request using our existing RSA key
+$certReq = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+    "CN=JIT Migration Local Test",
+    $rsa,
+    [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+)
+
+# Add key usage extensions
+$keyUsage = [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+    [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment -bor
+    [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DataEncipherment,
+    $false
+)
+$certReq.CertificateExtensions.Add($keyUsage)
+
+# Create self-signed certificate (valid for 2 years)
+$notBefore = [DateTime]::UtcNow
+$notAfter = $notBefore.AddYears(2)
+$cert = $certReq.CreateSelfSigned($notBefore, $notAfter)
+
+# Export certificate to DER format (public key only)
 $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
 $certBase64 = [Convert]::ToBase64String($certBytes)
-
-# Remove certificate from store (we only needed it temporarily)
-Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
 
 # Also export just the public key (for reference)
 $publicKeyBytes = $rsa.ExportSubjectPublicKeyInfo()
