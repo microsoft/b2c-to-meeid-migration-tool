@@ -26,8 +26,8 @@ This project is currently a **preview/sample implementation** showcasing Just-In
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/alvesfabi/B2C-Migration-Kit.git
-   cd B2C-Migration-Kit
+   git clone https://github.com/microsoft/b2c-to-meeid-migration-tool.git
+   cd b2c-to-meeid-migration-tool
    ```
 
 2. **Install dependencies**
@@ -38,8 +38,10 @@ This project is currently a **preview/sample implementation** showcasing Just-In
 3. **Configure local settings**
    ```bash
    cd src/B2CMigrationKit.Console
-   cp appsettings.json appsettings.local.json
-   # Edit appsettings.local.json with your tenant credentials
+   cp appsettings.master.example.json appsettings.master.json
+   cp appsettings.user-worker.example.json appsettings.user-worker.json
+   cp appsettings.phone-worker.example.json appsettings.phone-worker.json
+   # Edit each file with your tenant credentials
    ```
 
 4. **Set up Azurite (local storage emulator)**

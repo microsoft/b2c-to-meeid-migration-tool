@@ -166,6 +166,14 @@ public class ImportOrchestrator : IOrchestrator<ExecutionResult>
                                         // Update the issuerAssignedId domain to External ID tenant
                                         identity.IssuerAssignedId = TransformUpnForExternalId(identity.IssuerAssignedId);
                                     }
+                                    else if (!string.IsNullOrEmpty(_options.Import.UpnSuffix) &&
+                                             identity.SignInType?.ToLower() == "emailaddress" &&
+                                             !string.IsNullOrEmpty(identity.IssuerAssignedId))
+                                    {
+                                        var emailAt = identity.IssuerAssignedId.IndexOf('@');
+                                        if (emailAt > 0)
+                                            identity.IssuerAssignedId = identity.IssuerAssignedId[..emailAt] + _options.Import.UpnSuffix + identity.IssuerAssignedId[emailAt..];
+                                    }
                                 }
 
                                 if (_options.VerboseLogging)
@@ -542,6 +550,12 @@ public class ImportOrchestrator : IOrchestrator<ExecutionResult>
             localPart = Guid.NewGuid().ToString("N").Substring(0, 8); // Use first 8 chars of GUID
         }
 
+        // Append UpnSuffix to avoid collisions with users from previous migrations
+        if (!string.IsNullOrEmpty(_options.Import.UpnSuffix))
+        {
+            localPart += _options.Import.UpnSuffix;
+        }
+
         // Replace domain with External ID tenant domain
         var newUpn = $"{localPart}@{_options.ExternalId.TenantDomain}";
 
@@ -555,16 +569,11 @@ public class ImportOrchestrator : IOrchestrator<ExecutionResult>
 
     private void EnsureEmailIdentity(UserProfile user)
     {
-        // Determine which identity type to create based on configuration
-        var targetSignInType = _options.Import.MigrationAttributes.UseEmailOtp 
-            ? "federated"      // Email OTP (passwordless)
-            : "emailaddress";  // Email + Password (with JIT migration)
+        // Check if user already has an emailAddress identity
+        var hasEmailIdentity = user.Identities?.Any(i =>
+            string.Equals(i.SignInType, "emailAddress", StringComparison.OrdinalIgnoreCase)) ?? false;
 
-        // Check if user already has the target identity type
-        var hasTargetIdentity = user.Identities?.Any(i =>
-            i.SignInType?.ToLower() == targetSignInType.ToLower()) ?? false;
-
-        if (!hasTargetIdentity)
+        if (!hasEmailIdentity)
         {
             // Determine email to use:
             // 1. Prefer mail field if available
@@ -584,38 +593,26 @@ public class ImportOrchestrator : IOrchestrator<ExecutionResult>
                 }
             }
 
-            // Add the appropriate identity based on configuration
-            user.Identities ??= new List<ObjectIdentity>();
-            
-            if (_options.Import.MigrationAttributes.UseEmailOtp)
+            // Apply UpnSuffix to email identity to avoid collisions with previous migrations
+            if (!string.IsNullOrEmpty(_options.Import.UpnSuffix) && !string.IsNullOrEmpty(email))
             {
-                // Email OTP (passwordless) - uses federated identity with issuer="mail"
-                user.Identities.Add(new ObjectIdentity
-                {
-                    SignInType = "federated",
-                    Issuer = "mail",  // Special issuer for Email OTP
-                    IssuerAssignedId = email
-                });
-                
-                if (_options.VerboseLogging)
-                {
-                    _logger.LogDebug("Added Email OTP identity (federated): {Email}", email);
-                }
+                var emailAt = email.IndexOf('@');
+                if (emailAt > 0)
+                    email = email[..emailAt] + _options.Import.UpnSuffix + email[emailAt..];
             }
-            else
+
+            // Add emailAddress identity for Email + Password (with JIT migration)
+            user.Identities ??= new List<ObjectIdentity>();
+            user.Identities.Add(new ObjectIdentity
             {
-                // Email + Password (with JIT migration)
-                user.Identities.Add(new ObjectIdentity
-                {
-                    SignInType = "emailAddress",
-                    Issuer = _options.ExternalId.TenantDomain,
-                    IssuerAssignedId = email
-                });
-                
-                if (_options.VerboseLogging)
-                {
-                    _logger.LogDebug("Added email identity (password-based): {Email}", email);
-                }
+                SignInType = "emailAddress",
+                Issuer = _options.ExternalId.TenantDomain,
+                IssuerAssignedId = email
+            });
+            
+            if (_options.VerboseLogging)
+            {
+                _logger.LogDebug("Added email identity (password-based): {Email}", email);
             }
         }
     }

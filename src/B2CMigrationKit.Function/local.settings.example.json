@@ -19,13 +19,6 @@
     "Migration__ExternalId__AppRegistration__Name": "External ID App Registration",
     "Migration__ExternalId__AppRegistration__Enabled": "true",
 
-    "Migration__ExternalId__PasswordPolicy__MinLength": "8",
-    "Migration__ExternalId__PasswordPolicy__RequireUppercase": "true",
-    "Migration__ExternalId__PasswordPolicy__RequireLowercase": "true",
-    "Migration__ExternalId__PasswordPolicy__RequireDigit": "true",
-    "Migration__ExternalId__PasswordPolicy__RequireSpecialCharacter": "true",
-    "Migration__ExternalId__PasswordPolicy__AllowedSpecialCharacters": "!@#$%^&*()_+-=[]{}|;:,.<>?",
-
     "Migration__JitAuthentication__UseKeyVault": "false",
     "Migration__JitAuthentication__TestMode": "false",
     "Migration__JitAuthentication__RsaKeyName": "JIT-RSA-PrivateKey",

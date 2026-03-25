@@ -6,7 +6,6 @@ using B2CMigrationKit.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net.Http.Json;
-using System.Text.RegularExpressions;
 
 namespace B2CMigrationKit.Core.Services.Infrastructure;
 
@@ -17,7 +16,6 @@ public class AuthenticationService : IAuthenticationService
 {
     private readonly HttpClient _httpClient;
     private readonly B2COptions _b2cOptions;
-    private readonly ExternalIdOptions _externalIdOptions;
     private readonly ILogger<AuthenticationService> _logger;
 
     public AuthenticationService(
@@ -27,7 +25,6 @@ public class AuthenticationService : IAuthenticationService
     {
         _httpClient = httpClientFactory?.CreateClient() ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _b2cOptions = options?.Value?.B2C ?? throw new ArgumentNullException(nameof(options));
-        _externalIdOptions = options?.Value?.ExternalId ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -92,66 +89,5 @@ public class AuthenticationService : IAuthenticationService
                 "authentication_error",
                 ex.Message);
         }
-    }
-
-    public PasswordValidationResult ValidatePasswordComplexity(string password)
-    {
-        var policy = _externalIdOptions.PasswordPolicy;
-        var errors = new List<string>();
-        var result = new PasswordValidationResult();
-
-        if (password.Length < policy.MinLength)
-        {
-            errors.Add($"Password must be at least {policy.MinLength} characters long");
-        }
-        else
-        {
-            result.MeetsLengthRequirement = true;
-        }
-
-        if (policy.RequireUppercase && !Regex.IsMatch(password, "[A-Z]"))
-        {
-            errors.Add("Password must contain at least one uppercase letter");
-        }
-        else if (policy.RequireUppercase)
-        {
-            result.HasUppercase = true;
-        }
-
-        if (policy.RequireLowercase && !Regex.IsMatch(password, "[a-z]"))
-        {
-            errors.Add("Password must contain at least one lowercase letter");
-        }
-        else if (policy.RequireLowercase)
-        {
-            result.HasLowercase = true;
-        }
-
-        if (policy.RequireDigit && !Regex.IsMatch(password, "[0-9]"))
-        {
-            errors.Add("Password must contain at least one digit");
-        }
-        else if (policy.RequireDigit)
-        {
-            result.HasDigit = true;
-        }
-
-        if (policy.RequireSpecialCharacter)
-        {
-            var specialChars = Regex.Escape(policy.AllowedSpecialCharacters);
-            if (!Regex.IsMatch(password, $"[{specialChars}]"))
-            {
-                errors.Add("Password must contain at least one special character");
-            }
-            else
-            {
-                result.HasSpecialCharacter = true;
-            }
-        }
-
-        result.IsValid = !errors.Any();
-        result.Errors = errors;
-
-        return result;
     }
 }

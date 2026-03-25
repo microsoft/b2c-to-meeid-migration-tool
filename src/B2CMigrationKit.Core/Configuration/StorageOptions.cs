@@ -33,11 +33,6 @@ public class StorageOptions
     public string ImportAuditContainerName { get; set; } = "import-audit";
 
     /// <summary>
-    /// Gets or sets the queue name for profile sync messages.
-    /// </summary>
-    public string ProfileSyncQueueName { get; set; } = "profile-updates";
-
-    /// <summary>
     /// Gets or sets the blob name prefix for export files.
     /// </summary>
     public string ExportBlobPrefix { get; set; } = "users_";
@@ -46,4 +41,31 @@ public class StorageOptions
     /// Gets or sets whether to use Managed Identity for authentication (default: true).
     /// </summary>
     public bool UseManagedIdentity { get; set; } = true;
+
+    /// <summary>
+    /// Azure Table Storage table name for migration audit records.
+    /// Each <c>worker-migrate</c> user-create and <c>worker-phone</c> phone-register
+    /// outcome is written here as a searchable row.
+    /// Default: "migrationAudit"
+    /// </summary>
+    public string AuditTableName { get; set; } = "migrationAudit";
+
+    /// <summary>
+    /// Audit output mode. Controls where migration audit records are written.
+    /// <list type="bullet">
+    ///   <item><term>Table</term><description>Azure Table Storage (default, recommended for production)</description></item>
+    ///   <item><term>File</term><description>Local JSONL file — no Azure Storage required, useful for local testing</description></item>
+    ///   <item><term>None</term><description>Audit disabled — no records are written</description></item>
+    /// </list>
+    /// Default: "Table"
+    /// </summary>
+    public string AuditMode { get; set; } = "File";
+
+    /// <summary>
+    /// Path to the local JSONL audit file. Only used when <see cref="AuditMode"/> is "File".
+    /// Records are appended so multiple runs accumulate in the same file.
+    /// Relative paths are resolved against the working directory of the process.
+    /// Default: "migration-audit.jsonl"
+    /// </summary>
+    public string AuditFilePath { get; set; } = "migration-audit.jsonl";
 }

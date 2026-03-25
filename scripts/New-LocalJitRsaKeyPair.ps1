@@ -85,24 +85,36 @@ $eBase64Url = ConvertTo-Base64Url $publicKeyParams.Exponent
 # Generate unique key ID
 $kid = [Guid]::NewGuid().ToString()
 
-# Create self-signed certificate for Graph API (valid for 2 years)
-Write-Host "Generating self-signed certificate..." -ForegroundColor Cyan
-$cert = New-SelfSignedCertificate `
-    -Subject "CN=JIT Migration Local Test" `
-    -KeyAlgorithm RSA `
-    -KeyLength 2048 `
-    -NotAfter (Get-Date).AddYears(2) `
-    -CertStoreLocation "Cert:\CurrentUser\My" `
-    -KeyExportPolicy Exportable `
-    -KeyUsage KeyEncipherment, DataEncipherment `
-    -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")
+# Create self-signed certificate using the SAME RSA key (critical: must match private key)
+Write-Host "Generating self-signed certificate from same RSA key..." -ForegroundColor Cyan
 
-# Export certificate to file (DER format)
+$certRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+    "CN=JIT Migration Local Test",
+    $rsa,
+    [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+
+# Add Key Usage extension (KeyEncipherment, DataEncipherment)
+$certRequest.CertificateExtensions.Add(
+    [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+        [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyEncipherment -bor
+        [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DataEncipherment,
+        $true))
+
+# Add Enhanced Key Usage (Server Authentication)
+$oidCollection = [System.Security.Cryptography.OidCollection]::new()
+$oidCollection.Add([System.Security.Cryptography.Oid]::new("1.3.6.1.5.5.7.3.1")) | Out-Null
+$certRequest.CertificateExtensions.Add(
+    [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new(
+        $oidCollection, $false))
+
+$notBefore = [DateTimeOffset]::UtcNow
+$notAfter = $notBefore.AddYears(2)
+$cert = $certRequest.CreateSelfSigned($notBefore, $notAfter)
+
+# Export certificate to DER format
 $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
 $certBase64 = [Convert]::ToBase64String($certBytes)
-
-# Remove certificate from store (we only needed it temporarily)
-Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
 
 # Also export just the public key (for reference)
 $publicKeyBytes = $rsa.ExportSubjectPublicKeyInfo()

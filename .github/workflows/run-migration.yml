@@ -1,0 +1,134 @@
+name: Build & Deploy Migration App
+
+on:
+  workflow_dispatch:
+    inputs:
+      vmCount:
+        description: 'Number of VMs to provision app on (1-5)'
+        required: true
+        default: '5'
+        type: string
+      configProfile:
+        description: 'Config profile prefix (maps to appsettings-{profile}N secrets in Key Vault)'
+        required: true
+        default: 'worker'
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-b2c-migration
+  STORAGE_ACCOUNT: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+
+jobs:
+  build-and-upload:
+    name: Build & Upload App
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish self-contained (linux-x64)
+        run: |
+          dotnet publish src/B2CMigrationKit.Console/B2CMigrationKit.Console.csproj \
+            -c Release \
+            -r linux-x64 \
+            --self-contained true \
+            -o ./publish
+
+      - name: Create tarball
+        run: tar czf b2c-migration-app.tar.gz -C ./publish .
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload artifact to Blob Storage
+        run: |
+          az storage blob upload \
+            --account-name ${{ env.STORAGE_ACCOUNT }} \
+            --container-name app-deploy \
+            --name b2c-migration-app.tar.gz \
+            --file b2c-migration-app.tar.gz \
+            --auth-mode login \
+            --overwrite
+
+      - name: Upload configs from Key Vault to each VM
+        run: |
+          KV_NAME=$(az keyvault list -g ${{ env.RESOURCE_GROUP }} --query "[0].name" -o tsv)
+          echo "Key Vault: $KV_NAME"
+
+          for i in $(seq 1 ${{ inputs.vmCount }}); do
+            VM_NAME="vm-b2c-worker${i}"
+            SECRET_NAME="appsettings-${{ inputs.configProfile }}${i}"
+
+            echo "::group::Provisioning $VM_NAME"
+
+            # Use run-command as best-effort; if blocked by policy, manual setup via Bastion.
+            az vm run-command invoke \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --name "$VM_NAME" \
+              --command-id RunShellScript \
+              --scripts "
+                set -e
+                DEPLOY_DIR=/opt/b2c-migration/app
+
+                # Install az cli if needed
+                if ! command -v az &>/dev/null; then
+                  curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+                fi
+
+                az login --identity --allow-no-subscriptions
+
+                # Download app
+                mkdir -p \$DEPLOY_DIR
+                az storage blob download \
+                  --account-name ${{ env.STORAGE_ACCOUNT }} \
+                  --container-name app-deploy \
+                  --name b2c-migration-app.tar.gz \
+                  --file /tmp/b2c-migration-app.tar.gz \
+                  --auth-mode login
+                tar xzf /tmp/b2c-migration-app.tar.gz -C \$DEPLOY_DIR
+                chmod +x \$DEPLOY_DIR/B2CMigrationKit.Console
+
+                # Download config
+                az keyvault secret show \
+                  --vault-name $KV_NAME \
+                  --name $SECRET_NAME \
+                  --query value -o tsv > \$DEPLOY_DIR/appsettings.json
+
+                echo 'Deploy complete on $(hostname)'
+              " || echo "::warning::run-command failed for $VM_NAME — deploy manually via Bastion"
+
+            echo "::endgroup::"
+          done
+
+      - name: Summary
+        run: |
+          echo "## 📦 App Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Artifact uploaded to \`${{ env.STORAGE_ACCOUNT }}/app-deploy/b2c-migration-app.tar.gz\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Connect to each VM via Bastion tunnel and run:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# 1. Open tunnel (from your local terminal)" >> $GITHUB_STEP_SUMMARY
+          echo "az network bastion tunnel --name bastion-b2c-migration --resource-group ${{ env.RESOURCE_GROUP }} --target-resource-id /subscriptions/\$SUB/resourceGroups/${{ env.RESOURCE_GROUP }}/providers/Microsoft.Compute/virtualMachines/vm-b2c-worker1 --resource-port 22 --port 2201" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 2. SSH in another terminal" >> $GITHUB_STEP_SUMMARY
+          echo "ssh -p 2201 azureuser@localhost" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 3. Run migration" >> $GITHUB_STEP_SUMMARY
+          echo "cd /opt/b2c-migration/app" >> $GITHUB_STEP_SUMMARY
+          echo "./B2CMigrationKit.Console harvest --config appsettings.json" >> $GITHUB_STEP_SUMMARY
+          echo "./B2CMigrationKit.Console worker-migrate --config appsettings.json" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

@@ -78,12 +78,12 @@ public class JitMigrationService
             
             if (_options.JitAuthentication.TestMode)
             {
-                _logger.LogWarning("[JIT Migration] [TEST MODE] Step 1/3: SKIPPING B2C credential validation - ALL PASSWORDS ACCEPTED | UPN: {UPN}", userPrincipalName);
+                _logger.LogWarning("[JIT Migration] [TEST MODE] Step 1/2: SKIPPING B2C credential validation - ALL PASSWORDS ACCEPTED | UPN: {UPN}", userPrincipalName);
                 step1Duration = (DateTimeOffset.UtcNow - step1Start).TotalMilliseconds;
             }
             else
             {
-                _logger.LogInformation("[JIT Migration] Step 1/3: Validating credentials against B2C ROPC | UPN: {UPN}", userPrincipalName);
+                _logger.LogInformation("[JIT Migration] Step 1/2: Validating credentials against B2C ROPC | UPN: {UPN}", userPrincipalName);
                 
                 var authResult = await _authService.ValidateCredentialsAsync(userPrincipalName, password, cancellationToken);
                 
@@ -115,55 +115,16 @@ public class JitMigrationService
                 step1Duration = (DateTimeOffset.UtcNow - step1Start).TotalMilliseconds;
             }
 
-            // Step 2: Validate password complexity for External ID
-            var step2Start = DateTimeOffset.UtcNow;
-            double step2Duration;
-            
-            if (_options.JitAuthentication.TestMode)
-            {
-                _logger.LogWarning("[JIT Migration] [TEST MODE] Step 2/3: SKIPPING password complexity validation");
-                step2Duration = (DateTimeOffset.UtcNow - step2Start).TotalMilliseconds;
-            }
-            else
-            {
-                _logger.LogInformation("[JIT Migration] Step 2/3: Validating password complexity for External ID");
-                
-                if (!IsPasswordComplex(password))
-                {
-                    step2Duration = (DateTimeOffset.UtcNow - step2Start).TotalMilliseconds;
-                    _logger.LogWarning(
-                        "[JIT Migration] ❌ Password does not meet complexity requirements | UPN: {UPN} | Duration: {Duration}ms | CorrelationId: {CorrelationId}",
-                        userPrincipalName, step2Duration, correlationId);
-                    
-                    _telemetry.TrackEvent("JIT.ValidationFailed", new Dictionary<string, string>
-                    {
-                        { "UserId", userId },
-                        { "UserPrincipalName", userPrincipalName },
-                        { "CorrelationId", correlationId },
-                        { "Reason", "PasswordComplexity" },
-                        { "DurationMs", step2Duration.ToString() }
-                    });
-                    
-                    return new JitMigrationResult
-                    {
-                        ActionType = ResponseActionType.Block,
-                        Title = "Password Requirements Not Met",
-                        Message = "Your password does not meet the required complexity standards."
-                    };
-                }
-                
-                _logger.LogInformation("[JIT Migration] ✓ Password complexity validated | UPN: {UPN}", userPrincipalName);
-                step2Duration = (DateTimeOffset.UtcNow - step2Start).TotalMilliseconds;
-            }
-
-            // NOTE: External ID automatically updates the migration attribute to false when MigratePassword action is returned
-            // No manual update needed
+            // Step 2: Return MigratePassword action
+            // External ID handles password complexity validation and will prompt the user
+            // to update their password if it doesn't meet the tenant's policy.
+            // External ID also automatically updates the migration attribute to false.
 
             var totalDuration = (DateTimeOffset.UtcNow - startTime).TotalMilliseconds;
 
             _logger.LogInformation(
-                "[JIT Migration] ✅ SUCCESS - Returning MigratePassword action | UserId: {UserId} | UPN: {UPN} | Total: {Total}ms (Step1: {Step1}ms, Step2: {Step2}ms) | CorrelationId: {CorrelationId}",
-                userId, userPrincipalName, totalDuration, step1Duration, step2Duration, correlationId);
+                "[JIT Migration] ✅ SUCCESS - Returning MigratePassword action | UserId: {UserId} | UPN: {UPN} | Total: {Total}ms (Step1: {Step1}ms) | CorrelationId: {CorrelationId}",
+                userId, userPrincipalName, totalDuration, step1Duration, correlationId);
 
             _logger.LogInformation(
                 "[JIT Migration] → External ID will update password and migration attribute automatically.");
@@ -175,7 +136,6 @@ public class JitMigrationService
                 { "CorrelationId", correlationId },
                 { "TotalDurationMs", totalDuration.ToString() },
                 { "Step1DurationMs", step1Duration.ToString() },
-                { "Step2DurationMs", step2Duration.ToString() },
                 { "Timestamp", DateTimeOffset.UtcNow.ToString("o") }
             });
 
@@ -210,26 +170,7 @@ public class JitMigrationService
         }
     }
 
-    /// <summary>
-    /// Validates password complexity for External ID requirements.
-    /// </summary>
-    private bool IsPasswordComplex(string password)
-    {
-        if (string.IsNullOrEmpty(password))
-            return false;
 
-        // External ID password requirements:
-        // - At least 8 characters
-        // - Contains uppercase letter
-        // - Contains lowercase letter
-        // - Contains digit
-        // - Contains special character (non-alphanumeric)
-        return password.Length >= 8 &&
-               password.Any(char.IsUpper) &&
-               password.Any(char.IsLower) &&
-               password.Any(char.IsDigit) &&
-               password.Any(ch => !char.IsLetterOrDigit(ch));
-    }
 }
 
 /// <summary>

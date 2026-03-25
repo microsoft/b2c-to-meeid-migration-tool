@@ -55,4 +55,12 @@ public class TelemetryOptions
     /// Gets or sets custom properties to include with all telemetry.
     /// </summary>
     public Dictionary<string, string> GlobalProperties { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets a local file path for JSONL telemetry output.
+    /// Each line is a JSON object with at minimum: ts, type, name, and any custom properties.
+    /// Useful for local runs and load tests where App Insights is not available.
+    /// Set to null (default) to disable file output.
+    /// </summary>
+    public string? LogFilePath { get; set; } = null;
 }

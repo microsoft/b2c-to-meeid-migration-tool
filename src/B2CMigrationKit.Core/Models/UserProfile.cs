@@ -43,9 +43,23 @@ public class UserProfile
     public List<string> OtherMails { get; set; } = new();
 
     /// <summary>
-    /// Gets or sets the user's mobile phone number.
+    /// Gets or sets the user's mobile phone number (contact field on the user object).
+    /// This is the standard Graph <c>mobilePhone</c> profile attribute — a contact detail
+    /// that B2C users may or may not have set. It is NOT necessarily the MFA phone.
+    /// See <see cref="MfaPhoneNumber"/> for the actual registered MFA phone method.
     /// </summary>
     public string? MobilePhone { get; set; }
+
+    /// <summary>
+    /// Gets or sets the user's registered MFA mobile phone number, fetched from
+    /// <c>GET /users/{id}/authentication/phoneMethods/3179e48a-750b-4051-897c-87b9720928f7</c>
+    /// during the <c>phone-harvest</c> phase.
+    /// Null if the user has no mobile phone authentication method registered in B2C,
+    /// or if the phone-harvest phase has not been run yet.
+    /// This value is written to the <c>phones_*.json</c> blobs and merged into
+    /// <see cref="UserProfile"/> by <c>ImportOrchestrator</c> at import time.
+    /// </summary>
+    public string? MfaPhoneNumber { get; set; }
 
     /// <summary>
     /// Gets or sets the user's street address.

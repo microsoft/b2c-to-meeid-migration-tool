@@ -190,23 +190,15 @@ public class JitAuthenticationFunction
                 "[JIT Function] Transformed UPN for B2C validation | ExternalIdUPN: {ExternalIdUPN} | B2CUPN: {B2CUPN} | RequestId: {RequestId}",
                 userPrincipalName, b2cUpn, requestId);
 
-            // Perform JIT migration to B2C or whatever 3rp party IDP
-            _logger.LogInformation(
-                "[JIT Function] Calling JIT migration service | UserId: {UserId} | B2C UPN: {UPN} | CorrelationId: {CorrelationId} | RequestId: {RequestId}",
-                userId, b2cUpn, correlationId, requestId);
-
+            // Delegate to JitMigrationService (respects TestMode configuration)
             var result = await _jitService.MigrateUserAsync(
-                userId,
-                b2cUpn,
-                userPassword,
-                correlationId,
-                context.CancellationToken);
+                userId, b2cUpn, userPassword, correlationId);
 
             var duration = (DateTimeOffset.UtcNow - startTime).TotalMilliseconds;
 
             _logger.LogInformation(
-                "[JIT Function] ✅ JIT migration completed | UserId: {UserId} | Action: {Action} | AlreadyMigrated: {AlreadyMigrated} | Duration: {Duration}ms | Nonce: {NonceStatus} | CorrelationId: {CorrelationId} | RequestId: {RequestId}",
-                userId, result.ActionType, result.AlreadyMigrated, duration, !string.IsNullOrEmpty(nonce) ? "✓" : "✗", correlationId, requestId);
+                "[JIT Function] Completed | UserId: {UserId} | Action: {Action} | Duration: {Duration}ms | Nonce: {NonceStatus} | CorrelationId: {CorrelationId} | RequestId: {RequestId}",
+                userId, result.ActionType, duration, !string.IsNullOrEmpty(nonce) ? "✓" : "✗", correlationId, requestId);
 
             return await CreateExtensionResponseAsync(req, result, nonce);
         }
@@ -269,6 +261,10 @@ public class JitAuthenticationFunction
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = false
         });
+
+        // Log the exact JSON response for debugging
+        System.Diagnostics.Debug.WriteLine($"[JIT Function] Response JSON: {json}");
+        Console.WriteLine($"[JIT Function] Response JSON: {json}");
 
         await response.WriteStringAsync(json);
 
@@ -480,7 +476,7 @@ public class JitAuthenticationFunction
 
     /// <summary>
     /// Transform External ID UPN to B2C UPN by replacing domain.
-    /// This is the inverse transformation of ImportOrchestrator.TransformUpnForExternalId.
+    /// This is the inverse transformation of WorkerMigrateOrchestrator.TransformUpn.
     /// Examples:
     ///   user@externalid.onmicrosoft.com → user@b2c.onmicrosoft.com
     ///   047102b7-221a-4fcf-9bf6-a179e37efd62@externalid.onmicrosoft.com → 047102b7-221a-4fcf-9bf6-a179e37efd62@b2c.onmicrosoft.com

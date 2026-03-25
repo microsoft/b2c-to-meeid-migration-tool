@@ -92,4 +92,55 @@ public interface IGraphClient
         string password,
         bool forceChangePasswordNextSignIn = false,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Registers a phone number as a mobile MFA authentication method for the specified user.
+    /// Idempotent: a 409 Conflict (phone already registered) is treated as success.
+    /// Requires UserAuthenticationMethod.ReadWrite.All on the target tenant.
+    /// </summary>
+    /// <param name="userIdOrUpn">The user's object ID or userPrincipalName.</param>
+    /// <param name="phoneNumber">Phone number in E.164-ish format: "+1 2065551234".</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    Task RegisterPhoneAuthMethodAsync(
+        string userIdOrUpn,
+        string phoneNumber,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fetches the full profile for a batch of up to 20 users using the Graph $batch API.
+    /// Used by the Worker/Consumer phase of the Master-Worker export pattern to avoid
+    /// full-tenant pagination: each worker only resolves its own slice of pre-harvested IDs.
+    /// </summary>
+    /// <param name="userIds">Up to 20 user object IDs to fetch.</param>
+    /// <param name="select">Optional comma-separated list of properties to select.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>
+    /// A list of successfully retrieved user profiles.
+    /// Users that were not found or returned an error are omitted (logged at Warning level).
+    /// </returns>
+    Task<IReadOnlyList<UserProfile>> GetUsersByIdsAsync(
+        IEnumerable<string> userIds,
+        string? select = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fetches the registered mobile MFA phone number for a single user from B2C.
+    /// Calls <c>GET /users/{userId}/authentication/phoneMethods/3179e48a-750b-4051-897c-87b9720928f7</c>.
+    ///
+    /// This endpoint belongs to the <c>authenticationMethod</c> Graph resource family,
+    /// which has a different throttle budget than the main Users API.
+    /// Call throttling is managed by the caller via <see cref="PhoneRegistrationOptions.ThrottleDelayMs"/>.
+    ///
+    /// Requires <c>UserAuthenticationMethod.Read.All</c> on the B2C tenant.
+    /// </summary>
+    /// <param name="userId">The user's B2C object ID.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>
+    /// The phone number string (e.g. "+1 2065551234") if the user has a registered
+    /// mobile phone authentication method; <c>null</c> if the user has no such method
+    /// (HTTP 404) or if the method entry has no phone number set.
+    /// </returns>
+    Task<string?> GetMfaPhoneNumberAsync(
+        string userId,
+        CancellationToken cancellationToken = default);
 }

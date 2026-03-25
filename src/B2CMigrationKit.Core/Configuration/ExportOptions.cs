@@ -27,4 +27,19 @@ public class ExportOptions
     /// If null or empty, exports all users (subject to MaxUsers limit).
     /// </summary>
     public string? FilterPattern { get; set; }
+
+    // -------------------------------------------------------------------------
+    // Worker-mode (Master/Worker pattern) properties
+    // Used when running the 'worker-export' command instead of 'export'.
+    // Workers dequeue messages from the Azure Queue populated by the 'harvest'
+    // command, fetch full user profiles via Graph $batch, and upload blobs.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Gets or sets an optional prefix for blob names produced by worker instances.
+    /// Allows multiple workers to write to the same container without conflicts.
+    /// Example: "worker1_" → blobs named "users_worker1_000000.json".
+    /// If null or empty, an auto-generated unique prefix is used (recommended).
+    /// </summary>
+    public string? WorkerBlobPrefix { get; set; }
 }

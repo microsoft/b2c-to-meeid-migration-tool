@@ -23,20 +23,36 @@ public class GraphClient : IGraphClient
     private readonly ITelemetryService _telemetry;
     private readonly RetryOptions _retryOptions;
     private readonly ResiliencePipeline _retryPipeline;
+    // Identifies which tenant this client targets; included in every throttle log/event.
+    private readonly string _tenantRole;
 
     public GraphClient(
         GraphServiceClient client,
         IOptions<RetryOptions> retryOptions,
         ILogger<GraphClient> logger,
-        ITelemetryService telemetry)
+        ITelemetryService telemetry,
+        string tenantRole = "unknown")
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _retryOptions = retryOptions?.Value ?? throw new ArgumentNullException(nameof(retryOptions));
+        _tenantRole = tenantRole;
 
         _retryPipeline = CreateRetryPipeline();
     }
+
+    // HTTP status codes that are deterministic failures — retrying will never help.
+    private static readonly HashSet<int> _nonRetryableStatusCodes = new()
+    {
+        400, // Bad Request
+        401, // Unauthorized
+        403, // Forbidden
+        404, // Not Found
+        405, // Method Not Allowed
+        409, // Conflict (duplicate)
+        422, // Unprocessable Entity
+    };
 
     private ResiliencePipeline CreateRetryPipeline()
     {
@@ -47,10 +63,73 @@ public class GraphClient : IGraphClient
                 Delay = TimeSpan.FromMilliseconds(_retryOptions.InitialDelayMs),
                 BackoffType = DelayBackoffType.Exponential,
                 UseJitter = true,
+                ShouldHandle = args =>
+                {
+                    // Never retry deterministic failures — they will always fail the same way.
+                    if (args.Outcome.Exception is Microsoft.Graph.Models.ODataErrors.ODataError odataError
+                        && _nonRetryableStatusCodes.Contains(odataError.ResponseStatusCode))
+                    {
+                        return ValueTask.FromResult(false);
+                    }
+
+                    return ValueTask.FromResult(args.Outcome.Exception is not null);
+                },
+                // Honor the Retry-After header when the server sends one (typically on 429).
+                DelayGenerator = args =>
+                {
+                    if (_retryOptions.UseRetryAfterHeader
+                        && args.Outcome.Exception is Microsoft.Graph.Models.ODataErrors.ODataError throttleError
+                        && throttleError.ResponseStatusCode == 429
+                        && throttleError.ResponseHeaders.TryGetValue("Retry-After", out var values))
+                    {
+                        var raw = values.FirstOrDefault();
+                        if (int.TryParse(raw, out var seconds))
+                        {
+                            return new ValueTask<TimeSpan?>(TimeSpan.FromSeconds(seconds));
+                        }
+                    }
+                    // Return null → Polly falls back to exponential backoff + jitter.
+                    return new ValueTask<TimeSpan?>((TimeSpan?)null);
+                },
                 OnRetry = args =>
                 {
-                    _logger.LogWarning("Retry attempt {Attempt} after {Delay}ms due to: {Exception}",
-                        args.AttemptNumber, args.RetryDelay.TotalMilliseconds, args.Outcome.Exception?.Message);
+                    var isThrottle = args.Outcome.Exception is Microsoft.Graph.Models.ODataErrors.ODataError odataErr
+                        && odataErr.ResponseStatusCode == 429;
+
+                    // Read Retry-After header value for logging (may be absent).
+                    string? retryAfterRaw = null;
+                    if (args.Outcome.Exception is Microsoft.Graph.Models.ODataErrors.ODataError hdrErr
+                        && hdrErr.ResponseHeaders.TryGetValue("Retry-After", out var hdrValues))
+                    {
+                        retryAfterRaw = hdrValues.FirstOrDefault();
+                    }
+
+                    if (isThrottle)
+                    {
+                        _logger.LogWarning(
+                            "[THROTTLE] tenant={TenantRole} attempt={Attempt} delayMs={DelayMs} retryAfterHeader={RetryAfter}",
+                            _tenantRole, args.AttemptNumber + 1,
+                            (int)args.RetryDelay.TotalMilliseconds, retryAfterRaw ?? "none");
+
+                        _telemetry.TrackEvent("Graph.Throttled", new Dictionary<string, string>
+                        {
+                            ["tenantRole"]     = _tenantRole,
+                            ["attempt"]        = (args.AttemptNumber + 1).ToString(),
+                            ["delayMs"]        = ((int)args.RetryDelay.TotalMilliseconds).ToString(),
+                            ["retryAfterMs"]   = retryAfterRaw != null && int.TryParse(retryAfterRaw, out var s)
+                                                    ? (s * 1000).ToString() : "none",
+                            ["ts"]             = DateTimeOffset.UtcNow.ToString("o")
+                        });
+                        _telemetry.IncrementCounter("GraphClient.Throttled");
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "[RETRY] tenant={TenantRole} attempt={Attempt} delayMs={DelayMs} error={Error}",
+                            _tenantRole, args.AttemptNumber + 1,
+                            (int)args.RetryDelay.TotalMilliseconds, args.Outcome.Exception?.Message);
+                    }
+
                     _telemetry.IncrementCounter("GraphClient.Retries");
                     return ValueTask.CompletedTask;
                 }
@@ -308,6 +387,138 @@ public class GraphClient : IGraphClient
             await _client.Users[userId].PatchAsync(user, cancellationToken: ct);
 
             _telemetry.IncrementCounter("GraphClient.PasswordSet");
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CoreModels.UserProfile>> GetUsersByIdsAsync(
+        IEnumerable<string> userIds,
+        string? select = null,
+        CancellationToken cancellationToken = default)
+    {
+        var idList = userIds.ToList();
+        if (idList.Count == 0)
+        {
+            return Array.Empty<CoreModels.UserProfile>();
+        }
+
+        // Graph $batch is limited to 20 requests per call.
+        if (idList.Count > 20)
+        {
+            throw new ArgumentException("GetUsersByIdsAsync supports at most 20 user IDs per call. " +
+                "Chunk the list before calling this method.", nameof(userIds));
+        }
+
+        return await _retryPipeline.ExecuteAsync(async ct =>
+        {
+            var results = new List<CoreModels.UserProfile>(idList.Count);
+
+            var batchRequest = new Microsoft.Graph.BatchRequestContentCollection(_client);
+            var requestIdToUserId = new Dictionary<string, string>(idList.Count);
+
+            foreach (var userId in idList)
+            {
+                // Build a GET /users/{id} request, optionally with $select
+                var requestInfo = _client.Users[userId].ToGetRequestInformation(config =>
+                {
+                    if (!string.IsNullOrEmpty(select))
+                    {
+                        config.QueryParameters.Select = select.Split(',');
+                    }
+                });
+
+                var requestId = await batchRequest.AddBatchRequestStepAsync(requestInfo);
+                requestIdToUserId[requestId] = userId;
+            }
+
+            var batchResponse = await _client.Batch.PostAsync(batchRequest, cancellationToken: ct);
+
+            foreach (var (requestId, userId) in requestIdToUserId)
+            {
+                try
+                {
+                    var user = await batchResponse.GetResponseByIdAsync<GraphModels.User>(requestId);
+                    if (user != null)
+                    {
+                        results.Add(MapToUserProfile(user));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to retrieve user {UserId} in batch request {RequestId}", userId, requestId);
+                }
+            }
+
+            _telemetry.IncrementCounter("GraphClient.GetUsersByIds", results.Count);
+
+            return (IReadOnlyList<CoreModels.UserProfile>)results;
+        }, cancellationToken);
+    }
+
+    public async Task<string?> GetMfaPhoneNumberAsync(
+        string userId,
+        CancellationToken cancellationToken = default)
+    {
+        // Fixed GUID for the mobile phone authentication method type.
+        // Source: https://learn.microsoft.com/en-us/graph/api/phoneauthenticationmethod-get
+        const string MobilePhoneMethodId = "3179e48a-750b-4051-897c-87b9720928f7";
+
+        return await _retryPipeline.ExecuteAsync(async ct =>
+        {
+            try
+            {
+                var method = await _client.Users[userId]
+                    .Authentication
+                    .PhoneMethods[MobilePhoneMethodId]
+                    .GetAsync(cancellationToken: ct);
+
+                _telemetry.IncrementCounter("GraphClient.MfaPhoneFetched");
+                return method?.PhoneNumber;
+            }
+            catch (Microsoft.Graph.Models.ODataErrors.ODataError odataError)
+                when (odataError.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+            {
+                // 404 = no mobile phone method registered for this user — normal, not an error
+                _telemetry.IncrementCounter("GraphClient.MfaPhoneNotFound");
+                return null;
+            }
+        }, cancellationToken);
+    }
+
+    public async Task RegisterPhoneAuthMethodAsync(
+        string userIdOrUpn,
+        string phoneNumber,
+        CancellationToken cancellationToken = default)
+    {
+        await _retryPipeline.ExecuteAsync(async ct =>
+        {
+            try
+            {
+                var phoneMethod = new GraphModels.PhoneAuthenticationMethod
+                {
+                    PhoneNumber = phoneNumber,
+                    PhoneType = GraphModels.AuthenticationPhoneType.Mobile
+                };
+
+                await _client.Users[userIdOrUpn].Authentication.PhoneMethods
+                    .PostAsync(phoneMethod, cancellationToken: ct);
+
+                _telemetry.IncrementCounter("GraphClient.PhoneMethodRegistered");
+            }
+            catch (Microsoft.Graph.Models.ODataErrors.ODataError odataError)
+                when (odataError.ResponseStatusCode == (int)System.Net.HttpStatusCode.Conflict ||
+                      (odataError.ResponseStatusCode == (int)System.Net.HttpStatusCode.BadRequest &&
+                       odataError.Error?.Message != null &&
+                       odataError.Error.Message.Contains("already registered", StringComparison.OrdinalIgnoreCase)))
+            {
+                // 409 = phone already registered (standard conflict)
+                // 400 "already registered" = EEID returns BadRequest instead of Conflict in some cases
+                // Both are treated as success (idempotent)
+                _logger.LogDebug(
+                    "Phone method already registered for user {User} ({Status} — skipping)",
+                    userIdOrUpn, odataError.ResponseStatusCode);
+                _telemetry.IncrementCounter("GraphClient.PhoneMethodAlreadyRegistered");
+            }
         }, cancellationToken);
     }
 

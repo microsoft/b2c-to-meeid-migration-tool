@@ -20,11 +20,4 @@ public interface IAuthenticationService
         string username,
         string password,
         CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Validates that a password meets complexity requirements.
-    /// </summary>
-    /// <param name="password">The password to validate.</param>
-    /// <returns>Validation result with any error messages.</returns>
-    PasswordValidationResult ValidatePasswordComplexity(string password);
 }

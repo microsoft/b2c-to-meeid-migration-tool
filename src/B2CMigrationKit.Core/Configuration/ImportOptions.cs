@@ -3,7 +3,8 @@
 namespace B2CMigrationKit.Core.Configuration;
 
 /// <summary>
-/// Configuration options for import operations.
+/// Configuration options controlling how <c>worker-migrate</c> transforms users
+/// before creating them in Entra External ID.
 /// </summary>
 public class ImportOptions
 {
@@ -25,6 +26,23 @@ public class ImportOptions
     /// Gets or sets the migration-specific attribute configuration.
     /// </summary>
     public MigrationAttributesOptions MigrationAttributes { get; set; } = new();
+
+    /// <summary>
+    /// When true, the worker-migrate phase will not enqueue phone-registration messages.
+    /// Use this to run a dry-run or test migration without populating the phone queue.
+    /// Default: false.
+    /// </summary>
+    public bool SkipPhoneRegistration { get; set; } = false;
+
+    /// <summary>
+    /// Optional suffix appended to the local part of UPN, email identities, and displayName
+    /// when creating users in External ID. Useful for running multiple migration tests
+    /// against the same tenant without collisions with previously migrated users.
+    /// Example: "-test2" would transform "user@domain.com" → "user-test2@domain.com"
+    /// Default: null (no suffix).
+    /// </summary>
+    public string? UpnSuffix { get; set; }
+
 }
 
 /// <summary>
@@ -65,13 +83,6 @@ public class MigrationAttributesOptions
     /// Default: false
     /// </summary>
     public bool OverwriteExtensionAttributes { get; set; } = false;
-
-    /// <summary>
-    /// Gets or sets whether to use Email OTP (passwordless) instead of Email+Password.
-    /// When true, creates federated identity (issuer="mail") instead of emailAddress identity.
-    /// This is for users who will authenticate via Email OTP in External ID.
-    /// When false, creates emailAddress identity for password-based authentication with JIT migration.
-    /// Default: false (use Email+Password with JIT migration)
-    /// </summary>
-    public bool UseEmailOtp { get; set; } = false;
 }
+
+

@@ -7,6 +7,8 @@ using Microsoft.ApplicationInsights.DataContracts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace B2CMigrationKit.Core.Services.Observability;
 
@@ -21,6 +23,12 @@ public class TelemetryService : ITelemetryService
     private readonly TelemetryClient? _telemetryClient;
     private readonly TelemetryOptions _options;
     private readonly ConcurrentDictionary<string, long> _counters = new();
+    private readonly SemaphoreSlim _fileLock = new(1, 1);
+    private readonly ConcurrentBag<Task> _pendingFileTasks = new();
+    private static readonly JsonSerializerOptions _jsonOpts = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     public TelemetryService(
         ILogger<TelemetryService> logger,
@@ -45,7 +53,10 @@ public class TelemetryService : ITelemetryService
         {
             _logger.LogWarning("Telemetry: Application Insights requested but TelemetryClient not available");
         }
-    }
+        if (!string.IsNullOrEmpty(_options.LogFilePath))
+        {
+            _logger.LogInformation("Telemetry: File output ENABLED → {Path}", _options.LogFilePath);
+        }    }
 
     public void TrackEvent(string eventName, IDictionary<string, string>? properties = null)
     {
@@ -56,6 +67,12 @@ public class TelemetryService : ITelemetryService
         {
             var props = properties != null ? string.Join(", ", properties.Select(p => $"{p.Key}={p.Value}")) : "";
             _logger.LogInformation("[EVENT] {EventName} {Properties}", eventName, props);
+        }
+
+        // File logging (tracked for graceful flush on shutdown)
+        if (!string.IsNullOrEmpty(_options.LogFilePath))
+        {
+            _pendingFileTasks.Add(AppendToLogFileAsync("event", eventName, properties));
         }
 
         // Application Insights
@@ -118,6 +135,17 @@ public class TelemetryService : ITelemetryService
         {
             var props = properties != null ? string.Join(", ", properties.Select(p => $"{p.Key}={p.Value}")) : "";
             _logger.LogError(exception, "[EXCEPTION] {Properties}", props);
+        }
+
+        // File logging (tracked for graceful flush on shutdown)
+        if (!string.IsNullOrEmpty(_options.LogFilePath))
+        {
+            var exProps = new Dictionary<string, string>(properties ?? new Dictionary<string, string>())
+            {
+                ["exceptionType"] = exception.GetType().Name,
+                ["message"] = exception.Message
+            };
+            _pendingFileTasks.Add(AppendToLogFileAsync("exception", exception.GetType().Name, exProps));
         }
 
         // Application Insights
@@ -192,9 +220,9 @@ public class TelemetryService : ITelemetryService
         }
     }
 
-    public Task FlushAsync()
+    public async Task FlushAsync()
     {
-        if (!_options.Enabled) return Task.CompletedTask;
+        if (!_options.Enabled) return;
 
         // Console logging - log all final counter values
         if (_options.UseConsoleLogging)
@@ -211,6 +239,47 @@ public class TelemetryService : ITelemetryService
             _telemetryClient.Flush();
         }
 
-        return Task.CompletedTask;
+        // Drain any in-flight file writes so no telemetry is lost on shutdown
+        if (!string.IsNullOrEmpty(_options.LogFilePath) && !_pendingFileTasks.IsEmpty)
+        {
+            await Task.WhenAll(_pendingFileTasks).ConfigureAwait(false);
+        }
+    }
+
+    private async Task AppendToLogFileAsync(string type, string name, IDictionary<string, string>? properties)
+    {
+        try
+        {
+            var entry = new Dictionary<string, string?>
+            {
+                ["ts"]   = DateTimeOffset.UtcNow.ToString("o"),
+                ["type"] = type,
+                ["name"] = name
+            };
+
+            if (properties != null)
+            {
+                foreach (var kv in properties)
+                {
+                    entry[kv.Key] = kv.Value;
+                }
+            }
+
+            var line = JsonSerializer.Serialize(entry, _jsonOpts) + "\n";
+
+            await _fileLock.WaitAsync();
+            try
+            {
+                await File.AppendAllTextAsync(_options.LogFilePath!, line);
+            }
+            finally
+            {
+                _fileLock.Release();
+            }
+        }
+        catch
+        {
+            // File telemetry is best-effort; never block or crash the worker.
+        }
     }
 }

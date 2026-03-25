@@ -66,6 +66,15 @@ artifacts/
 
 # Local Development Configuration Files
 **/appsettings.local.json
+**/appsettings.json
+
+# Telemetry & audit output files (local run artifacts)
+**/*-telemetry.jsonl
+**/migration-audit-*.jsonl
+**/appsettings.phone-registration*.json
+**/appsettings.master.json
+**/appsettings.worker*.json
+**/appsettings.import-w*.json
 **/appsettings.*.local.json
 **/.env
 **/.env.local
@@ -81,6 +90,14 @@ local.settings.json
 **/jit-public-key*.txt
 **/jit-public-key*.json
 **/jit-public-key*.jwk.json
+
+# SSH Keys
+**/b2c-mig-deploy
+**/b2c-mig-deploy.pub
+**/id_ed25519
+**/id_ed25519.pub
+**/id_rsa
+**/id_rsa.pub
 
 # Test configuration with sensitive data
 **/migrate.http

@@ -1,0 +1,122 @@
+name: Deploy Migration Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: 'Azure region'
+        required: true
+        default: 'eastus'
+        type: choice
+        options:
+          - eastus
+          - eastus2
+          - westus2
+          - centralus
+          - brazilsouth
+      storageSuffix:
+        description: 'Storage account unique suffix (3-12 lowercase alphanumeric)'
+        required: true
+        type: string
+      vmSize:
+        description: 'VM size for workers'
+        required: true
+        default: 'Standard_B2s'
+        type: choice
+        options:
+          - Standard_B2s
+          - Standard_B2ms
+          - Standard_D2s_v5
+      vmCount:
+        description: 'Number of worker VMs (default: 5 = 1 master + 2 user-workers + 2 phone-workers)'
+        required: true
+        default: '5'
+        type: string
+      deployBastion:
+        description: 'Deploy Azure Bastion (adds ~$5/day)'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  id-token: write   # OIDC
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-b2c-migration
+
+jobs:
+  validate:
+    name: Validate Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate template
+        run: |
+          az deployment sub validate \
+            --location ${{ inputs.location }} \
+            --template-file infra/main.bicep \
+            --parameters \
+              location=${{ inputs.location }} \
+              storageAccountName="stb2cmig${{ inputs.storageSuffix }}" \
+              vmCount=${{ inputs.vmCount }} \
+              vmSize=${{ inputs.vmSize }} \
+              adminSshPublicKey="${{ secrets.VM_SSH_PUBLIC_KEY }}" \
+              deployBastion=${{ inputs.deployBastion }}
+
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: migration-infra
+    outputs:
+      resourceGroup: ${{ steps.deploy.outputs.resourceGroupName }}
+      storageAccount: ${{ steps.deploy.outputs.storageAccountName }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep
+        id: deploy
+        run: |
+          result=$(az deployment sub create \
+            --location ${{ inputs.location }} \
+            --template-file infra/main.bicep \
+            --parameters \
+              location=${{ inputs.location }} \
+              storageAccountName="stb2cmig${{ inputs.storageSuffix }}" \
+              vmCount=${{ inputs.vmCount }} \
+              vmSize=${{ inputs.vmSize }} \
+              adminSshPublicKey="${{ secrets.VM_SSH_PUBLIC_KEY }}" \
+              deployBastion=${{ inputs.deployBastion }} \
+            --query 'properties.outputs' -o json)
+
+          echo "resourceGroupName=$(echo $result | jq -r '.resourceGroupName.value')" >> "$GITHUB_OUTPUT"
+          echo "storageAccountName=$(echo $result | jq -r '.storageAccountName.value')" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Infrastructure Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | \`${{ steps.deploy.outputs.resourceGroupName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Storage Account | \`${{ steps.deploy.outputs.storageAccountName }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | \`${{ inputs.location }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| VMs | ${{ inputs.vmCount }}x ${{ inputs.vmSize }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bastion | ${{ inputs.deployBastion }} |" >> $GITHUB_STEP_SUMMARY

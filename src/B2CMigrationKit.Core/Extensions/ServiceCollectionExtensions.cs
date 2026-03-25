@@ -62,7 +62,22 @@ public static class ServiceCollectionExtensions
 
         // Register Azure Storage clients
         services.AddSingleton<IBlobStorageClient, BlobStorageClient>();
-        services.AddSingleton<IQueueClient, QueueClient>();
+        services.AddSingleton<IQueueClient, QueueStorageClient>();
+
+        // Register audit client based on AuditMode (Table | File | None)
+        var auditMode = configuration.GetValue<string>($"{MigrationOptions.SectionName}:Storage:AuditMode") ?? "Table";
+        switch (auditMode.Trim().ToLowerInvariant())
+        {
+            case "file":
+                services.AddSingleton<ITableStorageClient, FileAuditClient>();
+                break;
+            case "none":
+                services.AddSingleton<ITableStorageClient, NullAuditClient>();
+                break;
+            default: // "table"
+                services.AddSingleton<ITableStorageClient, TableStorageClient>();
+                break;
+        }
 
         // Register B2C Credential Manager
         services.AddSingleton<ICredentialManager>(sp =>
@@ -78,11 +93,18 @@ public static class ServiceCollectionExtensions
                 logger);
         });
 
-        // Register External ID Credential Manager
+        // Register External ID Credential Manager (skip if disabled — e.g. master/harvest role)
         services.AddSingleton<ICredentialManager>(sp =>
         {
             var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
             var logger = sp.GetRequiredService<ILogger<CredentialManager>>();
+
+            if (!options.ExternalId.AppRegistration.Enabled)
+            {
+                logger.LogInformation("External ID app registration is disabled — skipping credential setup (master/harvest role).");
+                return new NullCredentialManager();
+            }
+
             var secretProvider = sp.GetService<ISecretProvider>();
 
             return new CredentialManager(
@@ -114,14 +136,32 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthenticationService, AuthenticationService>();
 
         // Register orchestrators and services
-        services.AddScoped<ExportOrchestrator>();
 
-        // Register ImportOrchestrator with External ID Graph client
+        // ExportOrchestrator (Mode A): B2C Graph client + blob storage
+        services.AddScoped<ExportOrchestrator>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            var credManagers = sp.GetRequiredService<IEnumerable<ICredentialManager>>();
+            var telemetry = sp.GetRequiredService<ITelemetryService>();
+            var factoryLogger = sp.GetRequiredService<ILogger<GraphClientFactory>>();
+            var clientLogger = sp.GetRequiredService<ILogger<GraphClient>>();
+            var retryOptions = sp.GetRequiredService<IOptions<RetryOptions>>();
+            var blobClient = sp.GetRequiredService<IBlobStorageClient>();
+            var orchestratorLogger = sp.GetRequiredService<ILogger<ExportOrchestrator>>();
+
+            var factory = new GraphClientFactory(credManagers.First(), factoryLogger, telemetry);
+            var graphServiceClient = factory.CreateClient(options.B2C.Scopes);
+            var graphClient = new GraphClient(graphServiceClient, retryOptions, clientLogger, telemetry, "B2C");
+
+            return new ExportOrchestrator(graphClient, blobClient, telemetry,
+                Options.Create(options), orchestratorLogger);
+        });
+
+        // ImportOrchestrator (Mode A): EEID Graph client + blob storage
         services.AddScoped<ImportOrchestrator>(sp =>
         {
             var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
-            // Get External ID credential manager (second registered)
-            var credManager = sp.GetRequiredService<IEnumerable<ICredentialManager>>().Last();
+            var credManagers = sp.GetRequiredService<IEnumerable<ICredentialManager>>().ToList();
             var telemetry = sp.GetRequiredService<ITelemetryService>();
             var factoryLogger = sp.GetRequiredService<ILogger<GraphClientFactory>>();
             var clientLogger = sp.GetRequiredService<ILogger<GraphClient>>();
@@ -129,11 +169,117 @@ public static class ServiceCollectionExtensions
             var blobClient = sp.GetRequiredService<IBlobStorageClient>();
             var orchestratorLogger = sp.GetRequiredService<ILogger<ImportOrchestrator>>();
 
-            var factory = new GraphClientFactory(credManager, factoryLogger, telemetry);
+            var factory = new GraphClientFactory(credManagers.Last(), factoryLogger, telemetry);
             var graphServiceClient = factory.CreateClient(options.ExternalId.Scopes);
-            var graphClient = new GraphClient(graphServiceClient, retryOptions, clientLogger, telemetry);
+            var graphClient = new GraphClient(graphServiceClient, retryOptions, clientLogger, telemetry, "EEID");
 
-            return new ImportOrchestrator(graphClient, blobClient, telemetry, Options.Create(options), orchestratorLogger);
+            return new ImportOrchestrator(graphClient, blobClient, telemetry,
+                Options.Create(options), orchestratorLogger);
+        });
+
+        // HarvestOrchestrator (Mode B): uses B2C Graph client + queue
+        services.AddScoped<HarvestOrchestrator>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            var credManagers = sp.GetRequiredService<IEnumerable<ICredentialManager>>();
+            var telemetry = sp.GetRequiredService<ITelemetryService>();
+            var factoryLogger = sp.GetRequiredService<ILogger<GraphClientFactory>>();
+            var clientLogger = sp.GetRequiredService<ILogger<GraphClient>>();
+            var retryOptions = sp.GetRequiredService<IOptions<RetryOptions>>();
+            var queueClient = sp.GetRequiredService<IQueueClient>();
+            var orchestratorLogger = sp.GetRequiredService<ILogger<HarvestOrchestrator>>();
+
+            var factory = new GraphClientFactory(credManagers.First(), factoryLogger, telemetry);
+            var graphServiceClient = factory.CreateClient(options.B2C.Scopes);
+            var graphClient = new GraphClient(graphServiceClient, retryOptions, clientLogger, telemetry, "B2C");
+
+            return new HarvestOrchestrator(graphClient, queueClient, telemetry,
+                Options.Create(options), orchestratorLogger);
+        });
+
+        // WorkerMigrateOrchestrator: uses B2C Graph client (fetch) + EEID Graph client (create) + queue + table
+        services.AddScoped<WorkerMigrateOrchestrator>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            var credManagers = sp.GetRequiredService<IEnumerable<ICredentialManager>>().ToList();
+            var telemetry = sp.GetRequiredService<ITelemetryService>();
+            var factoryLogger = sp.GetRequiredService<ILogger<GraphClientFactory>>();
+            var clientLogger = sp.GetRequiredService<ILogger<GraphClient>>();
+            var retryOptions = sp.GetRequiredService<IOptions<RetryOptions>>();
+            var queueClient = sp.GetRequiredService<IQueueClient>();
+            var tableClient = sp.GetRequiredService<ITableStorageClient>();
+            var orchestratorLogger = sp.GetRequiredService<ILogger<WorkerMigrateOrchestrator>>();
+
+            // B2C Graph client (first credential manager)
+            var b2cFactory = new GraphClientFactory(credManagers.First(), factoryLogger, telemetry);
+            var b2cServiceClient = b2cFactory.CreateClient(options.B2C.Scopes);
+            var b2cClient = new GraphClient(b2cServiceClient, retryOptions, clientLogger, telemetry, "B2C");
+
+            // EEID Graph client (second credential manager)
+            var eeidFactory = new GraphClientFactory(credManagers.Last(), factoryLogger, telemetry);
+            var eeidServiceClient = eeidFactory.CreateClient(options.ExternalId.Scopes);
+            var eeidClient = new GraphClient(eeidServiceClient, retryOptions, clientLogger, telemetry, "EEID");
+
+            return new WorkerMigrateOrchestrator(b2cClient, eeidClient, queueClient, tableClient,
+                telemetry, Options.Create(options), orchestratorLogger);
+        });
+
+        // PhoneRegistrationWorker: B2C (phone lookup) + EEID (register) + queue + table
+        services.AddScoped<PhoneRegistrationWorker>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            var credManagers = sp.GetRequiredService<IEnumerable<ICredentialManager>>().ToList();
+            var telemetry = sp.GetRequiredService<ITelemetryService>();
+            var factoryLogger = sp.GetRequiredService<ILogger<GraphClientFactory>>();
+            var clientLogger = sp.GetRequiredService<ILogger<GraphClient>>();
+            var retryOptions = sp.GetRequiredService<IOptions<RetryOptions>>();
+            var queueClient = sp.GetRequiredService<IQueueClient>();
+            var tableClient = sp.GetRequiredService<ITableStorageClient>();
+            var workerLogger = sp.GetRequiredService<ILogger<PhoneRegistrationWorker>>();
+
+            // B2C Graph client — for GetMfaPhoneNumberAsync
+            var b2cFactory = new GraphClientFactory(credManagers.First(), factoryLogger, telemetry);
+            var b2cServiceClient = b2cFactory.CreateClient(options.B2C.Scopes);
+            var b2cClient = new GraphClient(b2cServiceClient, retryOptions, clientLogger, telemetry, "B2C");
+
+            // EEID Graph client — for RegisterPhoneAuthMethodAsync
+            var eeidFactory = new GraphClientFactory(credManagers.Last(), factoryLogger, telemetry);
+            var eeidServiceClient = eeidFactory.CreateClient(options.ExternalId.Scopes);
+            var eeidClient = new GraphClient(eeidServiceClient, retryOptions, clientLogger, telemetry, "EEID");
+
+            return new PhoneRegistrationWorker(b2cClient, eeidClient, queueClient, tableClient,
+                telemetry, Options.Create(options), workerLogger);
+        });
+
+        // ValidateOrchestrator: B2C Graph client + EEID Graph client + queue + blob
+        services.AddScoped<ValidateOrchestrator>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<MigrationOptions>>().Value;
+            var credManagers = sp.GetRequiredService<IEnumerable<ICredentialManager>>().ToList();
+            var telemetry = sp.GetRequiredService<ITelemetryService>();
+            var factoryLogger = sp.GetRequiredService<ILogger<GraphClientFactory>>();
+            var clientLogger = sp.GetRequiredService<ILogger<GraphClient>>();
+            var retryOptions = sp.GetRequiredService<IOptions<RetryOptions>>();
+            var queueClient = sp.GetRequiredService<IQueueClient>();
+            var blobClient = sp.GetRequiredService<IBlobStorageClient>();
+            var orchestratorLogger = sp.GetRequiredService<ILogger<ValidateOrchestrator>>();
+
+            // B2C Graph client (first credential manager)
+            var b2cFactory = new GraphClientFactory(credManagers.First(), factoryLogger, telemetry);
+            var b2cServiceClient = b2cFactory.CreateClient(options.B2C.Scopes);
+            var b2cClient = new GraphClient(b2cServiceClient, retryOptions, clientLogger, telemetry, "B2C");
+
+            // EEID Graph client (second credential manager — null if disabled)
+            IGraphClient? eeidClient = null;
+            if (options.ExternalId.AppRegistration.Enabled)
+            {
+                var eeidFactory = new GraphClientFactory(credManagers.Last(), factoryLogger, telemetry);
+                var eeidServiceClient = eeidFactory.CreateClient(options.ExternalId.Scopes);
+                eeidClient = new GraphClient(eeidServiceClient, retryOptions, clientLogger, telemetry, "EEID");
+            }
+
+            return new ValidateOrchestrator(b2cClient, eeidClient, queueClient, blobClient,
+                Options.Create(options), orchestratorLogger);
         });
 
         // Register JitMigrationService with External ID Graph client
@@ -160,12 +306,10 @@ public static class ServiceCollectionExtensions
 
             var factory = new GraphClientFactory(externalIdCredManager, factoryLogger, telemetry);
             var graphServiceClient = factory.CreateClient(options.ExternalId.Scopes);
-            var externalIdGraphClient = new GraphClient(graphServiceClient, retryOptions, clientLogger, telemetry);
+            var externalIdGraphClient = new GraphClient(graphServiceClient, retryOptions, clientLogger, telemetry, "EEID");
 
             return new JitMigrationService(authService, externalIdGraphClient, telemetry, Options.Create(options), logger);
         });
-
-        services.AddScoped<ProfileSyncService>();
 
         return services;
     }

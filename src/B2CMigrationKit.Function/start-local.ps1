@@ -1,6 +1,6 @@
 param(
     [int]$Port = 7071,
-    [string]$NgrokDomain = "your-ngrok-domai"
+    [string]$NgrokDomain = "transferable-nonglazed-trevor.ngrok-free.dev"
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,13 +43,25 @@ if ($existingNgrok) {
 # Start ngrok with static domain
 Write-Info "Starting ngrok tunnel with static domain: $NgrokDomain"
 $ngrokJob = Start-Process -FilePath "ngrok" -ArgumentList "http","$Port","--domain","$NgrokDomain" -WindowStyle Normal -PassThru
-Start-Sleep -Seconds 4
 
-# Get ngrok URL (should be static domain)
-try {
-    $ngrokApi = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -Method Get -ErrorAction Stop
-    $publicUrl = $ngrokApi.tunnels[0].public_url
-    
+# Wait for ngrok tunnel with retries
+$publicUrl = $null
+$maxRetries = 10
+for ($i = 1; $i -le $maxRetries; $i++) {
+    Start-Sleep -Seconds 2
+    try {
+        $ngrokApi = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -Method Get -ErrorAction Stop
+        if ($ngrokApi.tunnels.Count -gt 0) {
+            $publicUrl = $ngrokApi.tunnels[0].public_url
+            break
+        }
+        Write-Info "  Waiting for tunnel... (attempt $i/$maxRetries)"
+    } catch {
+        Write-Info "  Waiting for ngrok API... (attempt $i/$maxRetries)"
+    }
+}
+
+if ($publicUrl) {
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════" -ForegroundColor Green
     Write-Success "✓ ngrok Tunnel Active (Static Domain)"
@@ -84,15 +96,38 @@ try {
     Write-Host ""
     Write-Host "═══════════════════════════════════════════════" -ForegroundColor Green
     Write-Host ""
-}
-catch {
-    Write-Warning "Could not get ngrok URL yet, check http://localhost:4040"
+} else {
+    Write-Host ""
+    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Red
+    Write-Warning "✗ ngrok tunnel failed to start after $maxRetries attempts"
+    Write-Warning "  Check ngrok window for errors, or try:"
+    Write-Warning "  ngrok http $Port --domain $NgrokDomain --log stdout"
+    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host ""
+    
+    # Kill the failed ngrok process
+    if (!$ngrokJob.HasExited) {
+        Stop-Process -Id $ngrokJob.Id -Force -ErrorAction SilentlyContinue
+    }
+    exit 1
 }
 
 Write-Info "Starting Azure Function on port $Port..."
 Write-Info "Using binaries from: bin\Debug\net8.0\"
-Write-Warning "Press Ctrl+C to stop"
+Write-Warning "Press Ctrl+C to stop (ngrok will be cleaned up automatically)"
 Write-Host ""
 
-# Start func pointing to the built binaries explicitly
-func start --port $Port --script-root bin\Debug\net8.0
+try {
+    # Start func pointing to the built binaries explicitly
+    func start --port $Port --script-root bin\Debug\net8.0
+} finally {
+    # Cleanup: kill ngrok when function stops (Ctrl+C or crash)
+    Write-Host ""
+    Write-Info "Cleaning up ngrok process..."
+    if (!$ngrokJob.HasExited) {
+        Stop-Process -Id $ngrokJob.Id -Force -ErrorAction SilentlyContinue
+        Write-Success "✓ ngrok stopped"
+    } else {
+        Write-Info "ngrok already exited"
+    }
+}

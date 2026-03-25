@@ -25,9 +25,10 @@ public class B2COptions
     /// <summary>
     /// Gets or sets the app registration for B2C access.
     /// For JIT authentication, this app must have:
-    /// - Directory.Read.All permission with admin consent
     /// - Client secret configured
-    /// - Public client flows enabled
+    /// - Public client flows enabled (for ROPC)
+    /// Note: Directory.Read.All is NOT required. Bulk operations need User.Read.All;
+    /// JIT uses ROPC flow (no Graph permissions needed on this app).
     /// </summary>
     [Required]
     public AppRegistration AppRegistration { get; set; } = new();

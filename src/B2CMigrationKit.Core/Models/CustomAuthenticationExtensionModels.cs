@@ -173,10 +173,10 @@ public class ResponseAction
     {
         ODataType = actionType switch
         {
-            ResponseActionType.MigratePassword => "microsoft.graph.passwordsubmit.MigratePassword",
-            ResponseActionType.Block => "microsoft.graph.passwordsubmit.Block",
-            ResponseActionType.UpdatePassword => "microsoft.graph.passwordsubmit.UpdatePassword",
-            ResponseActionType.Retry => "microsoft.graph.passwordsubmit.Retry",
+            ResponseActionType.MigratePassword => "microsoft.graph.passwordSubmit.MigratePassword",
+            ResponseActionType.Block => "microsoft.graph.passwordSubmit.Block",
+            ResponseActionType.UpdatePassword => "microsoft.graph.passwordSubmit.UpdatePassword",
+            ResponseActionType.Retry => "microsoft.graph.passwordSubmit.Retry",
             _ => throw new ArgumentOutOfRangeException(nameof(actionType), actionType, null)
         };
 

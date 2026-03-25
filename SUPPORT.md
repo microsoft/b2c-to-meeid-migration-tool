@@ -17,8 +17,8 @@ Before opening an issue, please review:
 
 For questions and discussions:
 
-- **[GitHub Issues](https://github.com/alvesfabi/B2C-Migration-Kit/issues)** - Bug reports and feature requests
-- **[GitHub Discussions](https://github.com/alvesfabi/B2C-Migration-Kit/discussions)** - Questions and general discussion
+- **[GitHub Issues](https://github.com/microsoft/b2c-to-meeid-migration-tool/issues)** - Bug reports and feature requests
+- **[GitHub Discussions](https://github.com/microsoft/b2c-to-meeid-migration-tool/discussions)** - Questions and general discussion
 
 ### 🐛 Reporting Issues
 
