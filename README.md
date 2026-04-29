@@ -102,6 +102,38 @@ graph LR
     style JIT fill:#107c10,color:#fff
 ```
 
+### App Registration & API Connector Migration
+
+B2C API connectors (commonly used for token enrichment) are transformed into External ID [Custom Authentication Extensions](https://learn.microsoft.com/en-us/graph/api/resources/ontokenissuancestartcustomextension) (CAE) with the `onTokenIssuanceStart` event:
+
+```mermaid
+graph LR
+    subgraph "B2C (Source)"
+        App1[App Registration]
+        Connector[API Connector<br/>Basic Auth / API Key]
+        Flow[User Flow]
+        Flow -->|postAttributeCollection| Connector
+    end
+
+    subgraph "External ID (Target)"
+        App2[App Registration]
+        CAE[onTokenIssuanceStart CAE<br/>Azure AD Token Auth]
+        Listener[Event Listener]
+        Listener -->|triggers| CAE
+        Listener -->|linked to| App2
+    end
+
+    App1 -.->|Export-B2CApps.ps1<br/>Import-EeidApps.ps1| App2
+    Connector -.->|transformed| CAE
+
+    style App1 fill:#0078d4,color:#fff
+    style App2 fill:#0078d4,color:#fff
+    style CAE fill:#107c10,color:#fff
+    style Connector fill:#d83b01,color:#fff
+```
+
+> **Note:** B2C API connectors authenticate via Basic Auth / Client Certificate / API Key. External ID CAEs use Azure AD bearer tokens. After migration, update your API endpoints to validate Azure AD tokens.
+
 ---
 
 ## 🔑 Key Features
@@ -111,6 +143,8 @@ graph LR
 - **Simple Mode: Export/Import** — Simple two-step bulk migration via local JSON files; ideal for smaller tenants without MFA phone migration needs
 - **Advanced Mode: Harvest + Worker Migrate** — Harvest phase enqueues user IDs; N parallel worker-migrate instances fetch full B2C profiles and create users directly in EEID
 - **Async Phone Registration** (Advanced Mode) — MFA phone numbers fetched from B2C and registered in EEID at a throttle-safe rate 
+- **App Registration Migration** — Export B2C app registrations and re-create them in External ID
+- **API Connector → CAE Transformation** — Automatically transforms B2C API connectors into [onTokenIssuanceStart Custom Authentication Extensions](https://learn.microsoft.com/en-us/graph/api/resources/ontokenissuancestartcustomextension) for token enrichment
 - **Audit Trail** — Every user operation (Created, Duplicate, Failed, PhoneRegistered, PhoneSkipped) written to local JSONL by default (Azure Table Storage optional)
 - **JIT Password Migration** via Custom Authentication Extension
 - **UPN Domain Transformation** preserving local-part identifiers as a workaround to enable [sign-in alias](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-sign-in-alias) functionality
@@ -151,6 +185,19 @@ Complete technical reference for developers implementing and operating the migra
 - Security best practices and deployment procedures
 
 **Target Audience:** Developers, DevOps Engineers, Operations Teams
+
+### 🤖 GitHub Copilot Skill
+
+This repo includes a [Copilot agent skill](.github/skills/b2c-migration/SKILL.md) that lets GitHub Copilot guide you through the entire migration setup interactively. When the skill is active, you can ask Copilot things like:
+
+- *"Set up B2C migration for my tenant"*
+- *"Run the export/import in Simple Mode"*
+- *"Configure JIT password migration with devtunnels"*
+- *"Manage RequireMigration flags on test users"*
+- *"Deploy migration workers to Azure"*
+- *"Analyze migration telemetry"*
+
+The skill is auto-discovered by Copilot when the repo is open in VS Code. It covers setup, bulk migration (both modes), JIT configuration, local testing with VS Code port forwarding, Azure deployment, and telemetry analysis — all using the scripts in this repo.
 
 ## 🤝 Contributing
 
