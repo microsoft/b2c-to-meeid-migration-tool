@@ -41,7 +41,7 @@ When the user asks for help, determine which phase they need:
 | Validate before migration | [Readiness Validation](#readiness-validation) |
 | Deploy to Azure VMs | [Azure Deployment](#azure-deployment) |
 | Analyze results | [Telemetry & Analysis](#telemetry-and-analysis) |
-| Migrate B2C apps / API connectors | [App & Connector Migration](#app-and-connector-migration) |
+| Migrate B2C apps / API connectors | [App & Connector Migration](#app-and-connector-migration) — follow the **Agent Procedure** |
 
 ## Full Setup Wizard
 
@@ -391,21 +391,153 @@ bash /opt/b2c-migration/repo/scripts/Configure-Worker.sh
 
 ## App and Connector Migration
 
-Migrate B2C app registrations and transform API connectors to Custom Authentication Extensions:
+Migrate B2C app registrations and their API connectors to External ID as `onTokenIssuanceStart` Custom Authentication Extensions (CAE).
+
+> **This procedure is app-centric.** Each app is migrated as a unit. The agent asks only what's needed and handles the technical details automatically.
+
+### Agent Procedure — Per-App Migration
+
+When the user asks to migrate an app (or a set of apps), follow this guided flow:
+
+**1. Gather required information**
+
+Ask the user (only what you don't already know):
+- B2C tenant domain or ID (e.g. `contoso.onmicrosoft.com`)
+- External ID tenant domain or ID
+- App name(s) to migrate (exact or wildcard)
+
+**2. Identify connectors for the app**
+
+Explain: _"B2C Graph API doesn't expose which user flows belong to which app, so I can't automatically determine which API connectors are used by your app."_
+
+Ask: _"Does your app use any B2C API connectors? If yes, what are their names? (You can find them in Azure Portal → B2C → API connectors)"_
+
+If the user doesn't know or wants to migrate all connectors: proceed without `-ConnectorNames` (all connectors will be migrated).
+
+**3. Identify claims (optional but recommended)**
+
+If the app has API connectors, ask: _"What custom claims does your connector API return? (e.g. `role`, `department`, `subscriptionTier`) — These will be declared in the CAE so External ID includes them in tokens."_
+
+**4. Run dry-run first**
 
 ```powershell
-# Export from B2C
-.\scripts\Export-B2CApps.ps1 -TenantId "contosob2c.onmicrosoft.com"
-
-# Import to External ID
-.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" `
-    -InputFile "app-migration-export.json"
-
-# Dry run
-.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" -DryRun
+.\scripts\Migrate-B2CApp.ps1 `
+    -B2CTenantId "<b2c-tenant>" `
+    -EeidTenantId "<eeid-tenant>" `
+    -AppName "<AppName>" `
+    -ConnectorNames "<ConnectorName*>" `   # omit if user doesn't know / wants all
+    -ClaimsForToken "claim1","claim2" `    # omit if no connectors
+    -DryRun
 ```
 
-> **Auth model change:** B2C API connectors use Basic Auth / Client Certificate / API Key. External ID CAEs use Azure AD bearer tokens. Update your API endpoints to validate Azure AD tokens after migration.
+Show the user the dry-run output and ask for confirmation before proceeding.
+
+**5. Run the actual migration**
+
+```powershell
+.\scripts\Migrate-B2CApp.ps1 `
+    -B2CTenantId "<b2c-tenant>" `
+    -EeidTenantId "<eeid-tenant>" `
+    -AppName "<AppName>" `
+    -ConnectorNames "<ConnectorName*>" `
+    -ClaimsForToken "claim1","claim2" `
+    -SkipExport   # re-use the export from the dry-run
+```
+
+**6. Explain the migration report to the user**
+
+After running, the script prints a report with three sections. Explain each:
+
+| Section | Meaning |
+|---------|---------|
+| ✅ AUTOMATED | Done — no action needed |
+| ⚠️ MANUAL ACTIONS REQUIRED | User must do these steps in Azure Portal |
+| ❌ NOT MIGRATED | These features don't exist in External ID — user must redesign them |
+
+**The one required manual step is always admin consent:**
+```
+Azure Portal → App registrations → [CAE - <connector name>] → API permissions
+→ Grant admin consent for <tenant>
+```
+Without this, tokens will be issued without the custom claims.
+
+---
+
+### What the Script Does Automatically per App
+
+| Step | What happens |
+|------|-------------|
+| App registration | Re-created in External ID with matching redirect URIs, app roles, and API scopes |
+| B2C identifier URIs | Filtered — `b2clogin.com` URIs are removed (invalid in EEID) |
+| Per connector: CAE app | Created with `CustomAuthenticationExtension.Receive.Payload` permission |
+| Per connector: CAE extension | `onTokenIssuanceStartCustomExtension` pointing to same target URL |
+| Per connector: claims config | Populated from `-ClaimsForToken` parameter |
+| Per connector: event listener | Created and linked to all apps in the EEID tenant automatically |
+
+### What Cannot Be Migrated Automatically
+
+| B2C Feature | External ID Alternative | Action Required |
+|-------------|------------------------|-----------------|
+| User flow connector bindings | Event listeners (created automatically) | Verify in Portal |
+| Client secrets / certificates | Must be regenerated | Portal → Certificates & secrets |
+| B2C custom policies (IEF) | External ID user flows / custom auth extensions | Redesign required |
+| Phone MFA configured on flows | External ID MFA settings | Re-configure in EEID |
+| B2C identifier URIs (`b2clogin.com`) | Filtered out automatically | Update app code if needed |
+| Basic Auth / API Key on connector | Azure AD bearer token | Update API endpoint |
+
+### Auth Model Change (Required for All Connectors)
+
+B2C API connectors authenticate with **Basic Auth, API Key, or Client Certificate**.  
+External ID CAEs authenticate with **Azure AD bearer tokens**.
+
+After migration your API endpoint must:
+1. Accept `Authorization: Bearer <token>` and validate it against Azure AD
+2. Use the `resourceId` (audience) printed in the migration report
+3. Return claims in the CAE response format:
+
+```json
+{
+  "data": {
+    "@odata.type": "microsoft.graph.onTokenIssuanceStartResponseData",
+    "actions": [{
+      "@odata.type": "microsoft.graph.tokenIssuanceStart.provideClaimsForToken",
+      "claims": {
+        "claimName1": "claimValue1",
+        "multiValueClaim": ["value1", "value2"]
+      }
+    }]
+  }
+}
+```
+
+### Advanced: Bulk Migration (All Apps at Once)
+
+If the user wants to migrate all apps in one shot:
+
+```powershell
+# Export once
+.\scripts\Export-B2CApps.ps1 -TenantId "contosob2c.onmicrosoft.com"
+
+# Import all apps + all connectors + auto-create event listeners
+.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" `
+    -InputFile "app-migration-export.json" `
+    -ClaimsForToken "claim1","claim2"
+```
+
+For per-connector or per-app filtering see `-AppNames`, `-ConnectorNames`, `-SkipApps`, `-SkipConnectors` parameters.
+
+### App and Connector Migration Troubleshooting
+
+| Issue | Solution |
+|-------|---------|
+| App not found in export | Check exact display name in B2C Portal → App registrations |
+| `DomainNameDoesNotMatch` on CAE | The CAE app's `identifierUri` domain must match the `targetUrl` domain |
+| App already exists warning | Script skips creation and maps the existing app — safe to ignore |
+| CAE admin consent not granted | Tokens will be issued without enrichment claims until consent is granted |
+| API returns 401 after migration | Update API to validate Azure AD bearer tokens with `resourceId` as audience |
+| No claims in token after migration | Check: admin consent granted? `claimsForTokenConfiguration` set? Event listener active? |
+| `claimsForTokenConfiguration` empty | Claims won't appear in tokens — configure which claims to include via Portal or Graph API |
+| Script fails on SP creation | SP may already exist; the warning is non-blocking, check the Portal |
 
 ## Telemetry and Analysis
 

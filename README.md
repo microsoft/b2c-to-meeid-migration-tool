@@ -17,8 +17,30 @@ This repo includes a [Copilot skill](.github/skills/b2c-migration/SKILL.md) — 
 - *"Run the export/import in Simple Mode"*
 - *"Configure JIT password migration"*
 - *"Deploy migration workers to Azure"*
+- *"Migrate my B2C app MyWebApp to External ID"*
+- *"Transform my B2C API connectors to External ID CAE"*
 
-The skill covers the full workflow: setup, bulk migration, JIT configuration, local testing, deployment, and monitoring.
+The skill covers the full workflow: setup, bulk migration, JIT configuration, local testing, deployment, monitoring, and **app & API connector migration**.
+
+### App & Connector Migration (Copilot-guided)
+
+Migrate individual B2C apps and their API connectors to External ID with a single command. The Copilot skill guides you through the process interactively — just tell it which app you want to migrate:
+
+```
+"I want to migrate my B2C app to External ID"
+```
+
+Or run directly:
+```powershell
+.\scripts\Migrate-B2CApp.ps1 `
+    -B2CTenantId "contosob2c.onmicrosoft.com" `
+    -EeidTenantId "contosoeeid.onmicrosoft.com" `
+    -AppName "MyWebApp" `
+    -ConnectorNames "MyApp*" `
+    -ClaimsForToken "role","department"
+```
+
+The script exports the app from B2C, re-creates it in External ID, transforms API connectors into `onTokenIssuanceStart` Custom Authentication Extensions (CAE), and prints a clear report of what was automated, what needs manual action, and what could not be migrated.
 
 ## ⚡ Quick Start
 
