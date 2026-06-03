@@ -581,6 +581,83 @@ Expected response (TestMode=true): `{ "data": { "actions": [{ "@odata.type": "mi
 
 > **Reference**: `src/B2CMigrationKit.Function/sample/sample.cs` contains a standalone reference implementation showing the raw Custom Authentication Extension contract.
 
+## Native Auth + JIT Migration
+
+### Overview
+
+JIT password migration also works with **Native Authentication APIs** — mobile and desktop apps that call External ID directly via `/initiate` → `/challenge` → `/token` endpoints, without browser redirects.
+
+This is important because many B2C customers use embedded/native sign-in UIs (MSAL native auth, custom HTTP clients) rather than browser-based flows.
+
+### How It Works
+
+```
+Mobile/Desktop App
+  ├─ POST /oauth2/v2.0/initiate  (username, challenge_type=password)
+  ├─ POST /oauth2/v2.0/challenge (continuation_token, challenge_type=password)
+  └─ POST /oauth2/v2.0/token     (continuation_token, grant_type=password, password)
+       │
+       ├─ EEID checks RequiresMigration = true
+       ├─ onPasswordSubmit → Custom Authentication Extension → Azure Function
+       ├─ Function validates password against B2C (ROPC)
+       ├─ MigratePassword → EEID sets password + clears flag
+       └─ Returns tokens to app
+```
+
+The `onPasswordSubmit` event fires for any app included in the event listener — whether the sign-in comes from a browser redirect or Native Auth API call.
+
+### Setup
+
+```powershell
+# 1. Ensure JIT is configured (RSA keys, Function, CAE)
+#    See "JIT Migration Implementation" section above
+
+# 2. Configure Native Auth app + event listener
+.\scripts\Configure-NativeAuthJit.ps1 -TenantId "your-external-id-tenant-id"
+
+# 3. Prepare a test user
+.\scripts\New-TestUser.ps1 -Email "nativetest@yourdomain.com" -SetMigrationFlag true
+
+# 4. Start the Azure Function locally
+cd src\B2CMigrationKit.Function
+.\start-local.ps1
+
+# 5. Run the test
+.\scripts\Test-NativeAuthJit.ps1 `
+    -TenantSubdomain "your-tenant" `
+    -ClientId $env:NATIVE_AUTH_APP_ID `
+    -Username "nativetest@yourdomain.com" `
+    -Password "TempP@ssw0rd!2026" `
+    -SecondSignIn
+```
+
+### Key Configuration Requirements
+
+| Requirement | Details |
+|-------------|---------|
+| App registration | `nativeAuthenticationApisEnabled = "all"`, `isFallbackPublicClient = true` |
+| User flow | Must include `EmailPassword-OAUTH` identity provider |
+| Event listener | Must include the Native Auth app in `includeApplications` |
+| Admin consent | `openid` and `offline_access` delegated permissions |
+
+### Expected Test Results
+
+| Scenario | Expected Outcome |
+|----------|-----------------|
+| First sign-in (RequiresMigration=true) | CAE fires → password migrated → tokens returned |
+| Second sign-in (RequiresMigration=false) | Direct auth → tokens returned (no CAE) |
+| Wrong password + RequiresMigration=true | CAE fires → validation fails → sign-in blocked |
+| App NOT in event listener | Random EEID password doesn't match → sign-in fails |
+
+### Troubleshooting Native Auth
+
+| Issue | Solution |
+|-------|----------|
+| `challenge_type=redirect` returned | App not configured for Native Auth, or user flow missing EmailPassword provider |
+| `invalid_grant` at token endpoint | Password rejected by CAE (check Function logs) |
+| `interaction_required` | User flow requires attributes not provided via Native Auth |
+| Sign-in works but flag not cleared | Function in TestMode doesn't clear flag; set `TestMode=false` for full test |
+
 ## Attribute Mapping
 
 ### Overview

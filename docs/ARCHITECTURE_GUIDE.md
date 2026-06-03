@@ -314,6 +314,8 @@ JIT enables seamless password validation on first External ID login:
 5. Function validates via ROPC against B2C
 6. If valid → `MigratePassword` (EEID sets password, clears flag). If invalid → `BlockSignIn`
 
+> **Native Auth Support**: The `onPasswordSubmit` event fires for **any authentication method** — browser-based (redirect to jwt.ms) **and** Native Authentication APIs (direct `/initiate` → `/challenge` → `/token` calls). This means mobile/desktop apps using MSAL Native Auth or raw HTTP get the same JIT migration without any code changes to the Azure Function. See [Developer Guide — Native Auth + JIT](DEVELOPER_GUIDE.md#native-auth--jit-migration).
+
 **UPN Flow**:
 ```
 Import:  user@b2c.com → user@externalid.com  (preserve local part)

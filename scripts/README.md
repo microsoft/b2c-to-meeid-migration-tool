@@ -381,7 +381,34 @@ This script automates the full setup via device code flow:
 
 **Manual step required:** Grant admin consent for the Extension App in Azure Portal after the script completes.
 
-### 3. Switch Environments
+### 3. Native Auth + JIT (Direct API Testing)
+
+Test JIT migration via Native Authentication APIs — no browser needed:
+
+```powershell
+# Step 1: Configure Native Auth app + user flow + event listener
+.\scripts\Configure-NativeAuthJit.ps1 -TenantId "your-external-id-tenant-id"
+
+# Step 2: Create test user with migration flag
+.\scripts\New-TestUser.ps1 -Email "testjit1@slider-inc.com" -SetMigrationFlag true
+
+# Step 3: Test Native Auth sign-in triggers JIT
+.\scripts\Test-NativeAuthJit.ps1 `
+    -TenantSubdomain "lagomarciamdemo2" `
+    -ClientId $env:NATIVE_AUTH_APP_ID `
+    -Username "testjit1@slider-inc.com" `
+    -Password "TempP@ssw0rd!2026" `
+    -SecondSignIn
+```
+
+| Script | Description |
+|--------|-------------|
+| `Configure-NativeAuthJit.ps1` | Creates Native Auth app, user flow, links to event listener |
+| `Test-NativeAuthJit.ps1` | Runs Native Auth sign-in and verifies JIT fires |
+
+**Why this matters:** Proves that JIT password migration works with Native Auth APIs (mobile/desktop apps calling `/initiate` → `/challenge` → `/token` directly), not only with browser-redirect flows.
+
+### 4. Switch Environments
 
 Toggle JIT between local (ngrok) and Azure Function endpoints:
 
@@ -390,7 +417,7 @@ Toggle JIT between local (ngrok) and Azure Function endpoints:
 .\scripts\Switch-JitEnvironment.ps1 -Environment Azure    # production
 ```
 
-### 4. Start the Function Locally
+### 5. Start the Function Locally
 
 ```powershell
 cd src\B2CMigrationKit.Function
