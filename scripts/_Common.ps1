@@ -323,6 +323,26 @@ function Get-DeviceCodeToken {
 
 # ─── Graph REST helper ─────────────────────────────────────────────────────────
 
+<#
+.SYNOPSIS
+    Follows @odata.nextLink pagination and returns all items from a Graph GET
+    endpoint that returns { value: [...], @odata.nextLink: "..." }.
+#>
+function Invoke-GraphAllPages {
+    param(
+        [string]$Uri,
+        [hashtable]$Headers
+    )
+    $all = @()
+    $nextUri = $Uri
+    while ($nextUri) {
+        $res = Invoke-Graph -Method GET -Uri $nextUri -Headers $Headers
+        if ($res.value) { $all += $res.value }
+        $nextUri = $res.'@odata.nextLink'
+    }
+    return $all
+}
+
 function Invoke-Graph {
     param(
         [string]$Method,

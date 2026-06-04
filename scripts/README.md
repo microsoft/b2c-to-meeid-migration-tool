@@ -8,7 +8,8 @@ PowerShell and Bash scripts for running bulk migrations, deploying Azure infrast
 
 - [🏠 Local Development](#-local-development) — Setup, run migrations locally, test utilities
 - [☁️ Azure Production](#️-azure-production) — Deploy VMs, configure workers, connect via Bastion
-- [🔐 JIT Password Migration](#-jit-password-migration) — RSA keys, Custom Auth Extension, environment switching
+- [� App & Connector Migration](#-app--connector-migration) — Export B2C apps, transform API connectors to CAE
+- [�🔐 JIT Password Migration](#-jit-password-migration) — RSA keys, Custom Auth Extension, environment switching
 - [📊 Analysis & Monitoring](#-analysis--monitoring) — Live dashboard, telemetry download, reports
 
 ---
@@ -338,7 +339,77 @@ The script auto-installs the Azure CLI bastion extension if not present.
 
 ---
 
-## 🔐 JIT Password Migration
+## � App & Connector Migration
+
+Migrate B2C app registrations and transform API connectors into External ID [Custom Authentication Extensions](https://learn.microsoft.com/en-us/graph/api/resources/ontokenissuancestartcustomextension) (CAE).
+
+### Export-B2CApps.ps1
+
+Exports app registrations, API connectors, and user flow bindings from a B2C tenant to a JSON file.
+
+```powershell
+# Export everything from your B2C tenant
+.\scripts\Export-B2CApps.ps1 -TenantId "contosob2c.onmicrosoft.com"
+
+# Custom output path
+.\scripts\Export-B2CApps.ps1 -TenantId "your-tenant-id" -OutputFile ".\exports\b2c-apps.json"
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-TenantId` | *(required)* | B2C tenant ID or domain |
+| `-OutputFile` | `app-migration-export.json` | Path for the output JSON |
+
+The export file contains:
+- **App registrations** — all apps with redirect URIs, API permissions, app roles, OAuth2 scopes
+- **API connectors** — display name, target URL, auth type
+- **User flow bindings** — which connectors are attached at which steps (`postFederationSignup`, `postAttributeCollection`)
+
+Framework apps (`IdentityExperienceFramework`, `ProxyIdentityExperienceFramework`, `b2c-extensions-app`) are tagged in the export and skipped during import.
+
+### Import-EeidApps.ps1
+
+Reads the export JSON and creates matching resources in the External ID tenant:
+
+1. **App registrations** — re-created with redirect URIs, app roles, OAuth2 scopes
+2. **API connectors → CAE** — each connector becomes:
+   - An app registration (with `CustomAuthenticationExtension.Receive.Payload` permission)
+   - An `onTokenIssuanceStartCustomExtension` pointing to the same target URL
+   - Instructions for configuring event listeners
+
+```powershell
+# Import everything
+.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" `
+    -InputFile "app-migration-export.json"
+
+# Preview without making changes
+.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" -DryRun
+
+# Only migrate apps (skip connector transformation)
+.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" -SkipConnectors
+
+# Only transform connectors (apps already migrated)
+.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" -SkipApps
+
+# Transform specific connectors only
+.\scripts\Import-EeidApps.ps1 -TargetTenantId "contosoeeid.onmicrosoft.com" `
+    -ConnectorIds @("connector-guid-1", "connector-guid-2")
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-TargetTenantId` | *(required)* | External ID tenant ID or domain |
+| `-InputFile` | `app-migration-export.json` | Export JSON from `Export-B2CApps.ps1` |
+| `-SkipApps` | `false` | Skip app registration migration |
+| `-SkipConnectors` | `false` | Skip API connector → CAE transformation |
+| `-ConnectorIds` | *(all)* | Only transform these specific connector IDs |
+| `-DryRun` | `false` | Preview changes without making any API calls |
+
+> **⚠️ Auth model change:** B2C API connectors use Basic Auth / Client Certificate / API Key. External ID CAEs use Azure AD bearer tokens. After running this script, update your API endpoints to validate Azure AD tokens with the `resourceId` (audience) shown in the output. See the [Microsoft documentation](https://learn.microsoft.com/en-us/entra/identity-platform/custom-extension-tokenissuancestart-configuration) for response format details.
+
+---
+
+## �🔐 JIT Password Migration
 
 After bulk migration (either mode), configure JIT so passwords migrate seamlessly on each user's first login.
 
@@ -360,7 +431,7 @@ Generates four files (git-ignored):
 .\scripts\Configure-ExternalIdJit.ps1 `
     -TenantId "your-external-id-tenant-id" `
     -CertificatePath ".\jit-certificate.txt" `
-    -FunctionUrl "https://your-domain.ngrok-free.dev/api/JitAuthentication" `
+    -FunctionUrl "https://your-devtunnel-url.devtunnels.ms/api/JitAuthentication" `
     -MigrationPropertyId "extension_{ExtensionAppId}_RequiresMigration"
 ```
 
@@ -373,7 +444,7 @@ This script automates the full setup via device code flow:
 |-----------|----------|-------------|
 | `TenantId` | Yes | External ID tenant ID |
 | `CertificatePath` | Yes | Path to `jit-certificate.txt` |
-| `FunctionUrl` | Yes | Azure Function or ngrok endpoint URL |
+| `FunctionUrl` | Yes | Azure Function or VS Code devtunnel endpoint URL |
 | `MigrationPropertyId` | No | Extension attribute ID (prompted if not provided) |
 | `ExtensionAppName` | No | Display name for the Custom Auth Extension app (default: `EEID Auth Extension - JIT Migration`) |
 | `ClientAppName` | No | Display name for the test client app (default: `JIT Migration Test Client`) |
@@ -381,20 +452,47 @@ This script automates the full setup via device code flow:
 
 **Manual step required:** Grant admin consent for the Extension App in Azure Portal after the script completes.
 
-### 3. Switch Environments
+### 3. Native Auth + JIT (Direct API Testing)
 
-Toggle JIT between local (ngrok) and Azure Function endpoints:
+Test JIT migration via Native Authentication APIs — no browser needed:
 
 ```powershell
-.\scripts\Switch-JitEnvironment.ps1 -Environment Local   # ngrok
+# Step 1: Configure Native Auth app + user flow + event listener
+.\scripts\Configure-NativeAuthJit.ps1 -TenantId "your-external-id-tenant-id"
+
+# Step 2: Create test user with migration flag
+.\scripts\New-TestUser.ps1 -Email "testjit1@slider-inc.com" -SetMigrationFlag true
+
+# Step 3: Test Native Auth sign-in triggers JIT
+.\scripts\Test-NativeAuthJit.ps1 `
+    -TenantSubdomain "lagomarciamdemo2" `
+    -ClientId $env:NATIVE_AUTH_APP_ID `
+    -Username "testjit1@slider-inc.com" `
+    -Password "TempP@ssw0rd!2026" `
+    -SecondSignIn
+```
+
+| Script | Description |
+|--------|-------------|
+| `Configure-NativeAuthJit.ps1` | Creates Native Auth app, user flow, links to event listener |
+| `Test-NativeAuthJit.ps1` | Runs Native Auth sign-in and verifies JIT fires |
+
+**Why this matters:** Proves that JIT password migration works with Native Auth APIs (mobile/desktop apps calling `/initiate` → `/challenge` → `/token` directly), not only with browser-redirect flows.
+
+### 4. Switch Environments
+
+Toggle JIT between local (VS Code devtunnel) and Azure Function endpoints:
+
+```powershell
+.\scripts\Switch-JitEnvironment.ps1 -Environment Local   # devtunnel
 .\scripts\Switch-JitEnvironment.ps1 -Environment Azure    # production
 ```
 
-### 4. Start the Function Locally
+### 5. Start the Function Locally
 
 ```powershell
 cd src\B2CMigrationKit.Function
-.\start-local.ps1    # builds, starts ngrok + function on port 7071
+.\start-local.ps1    # builds, starts function on port 7071 (use VS Code port forwarding for public URL)
 ```
 
 Test the JIT flow via Azure Portal → User flows → Run user flow.

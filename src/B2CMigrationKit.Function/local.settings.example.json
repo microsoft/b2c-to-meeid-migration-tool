@@ -38,6 +38,10 @@
     "Migration__Retry__OperationTimeoutSeconds": "120",
 
     "Migration__Telemetry__Enabled": "false",
-    "Migration__Telemetry__ConnectionString": ""
+    "Migration__Telemetry__ConnectionString": "",
+
+    "ApiConnectorTest__ApiKey": "test-api-key-change-me",
+
+    "CaeTest__ExpectedAudience": ""
   }
 }
