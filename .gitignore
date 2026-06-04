@@ -251,3 +251,6 @@ FodyWeavers.xsd
 
 # Development configs with secrets
 **/appsettings.Development.json
+
+app-migration-export*.json
+b2c-app-migration*.json

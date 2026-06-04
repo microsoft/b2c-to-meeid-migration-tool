@@ -449,28 +449,28 @@ Create `src/B2CMigrationKit.Function/local.settings.json`:
 
 > Azure Functions uses flat `__`-separated keys. See `local.settings.example.json` for a complete template. `TestMode: true` skips B2C validation for testing without B2C access.
 
-### Step 3: Start Function with ngrok
+### Step 3: Start Function with VS Code Port Forwarding
 
 ```powershell
 cd src\B2CMigrationKit.Function
 .\start-local.ps1
 ```
 
-The script builds the function, starts ngrok tunnel, starts the function on port 7071, and copies the endpoint URL to clipboard.
+The script builds the function, starts it on port 7071, and prints instructions for exposing it publicly.
 
-**Manual alternative**:
-```powershell
-# Terminal 1
-ngrok http 7071
-# Terminal 2
-cd src\B2CMigrationKit.Function && func start
-```
+**Expose the function publicly** (required for External ID callbacks):
+1. In VS Code, press `Ctrl+Shift+P` → `Ports: Forward a Port` → enter `7071`
+2. Right-click the forwarded port in the **Ports** panel → **Port Visibility** → **Public**
+3. Copy the **Forwarded Address** (e.g., `https://abc123-7071.brs.devtunnels.ms`)
+4. Your JIT endpoint is: `<forwarded-url>/api/JitAuthentication`
+
+> **Note**: The devtunnel URL is stable for the duration of the VS Code session. If the URL changes, update the Custom Authentication Extension with `Configure-ExternalIdJit.ps1` or `Switch-JitEnvironment.ps1`.
 
 **VS Code debugging**: Press F5 → "Attach to .NET Functions" → select the `dotnet` process. Useful breakpoints: `JitAuthenticationFunction.cs:60` (parse payload), `JitMigrationService.cs:73` (check migration status), `JitMigrationService.cs:125` (ROPC validation).
 
 ### Step 4: Configure Custom Authentication Extension
 
-**Prerequisites**: RSA keys generated, local.settings.json configured, users imported with `RequiresMigration=true`, function running with ngrok.
+**Prerequisites**: RSA keys generated, local.settings.json configured, users imported with `RequiresMigration=true`, function running with a public URL (VS Code port forwarding or deployed to Azure).
 
 **Sub-Step 1**: Create app registration in External ID tenant. Record Application ID, Object ID. Create client secret.
 
@@ -500,14 +500,14 @@ Invoke-RestMethod -Method Patch `
 **Sub-Step 3**: Create Custom Authentication Extension resource:
 
 ```powershell
-$ngrokUrl = "https://your-domain.ngrok.app"
+$functionPublicUrl = "https://your-devtunnel-url.devtunnels.ms"  # from VS Code Ports panel
 $customExtensionAppClientId = "PASTE_CLIENT_ID"
 $token = (az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
 
 $body = @{
     "@odata.type" = "#microsoft.graph.onPasswordSubmitCustomExtension"
     displayName = "JIT Password Migration Extension"
-    targetUrl = "$ngrokUrl/api/JitAuthentication"
+    targetUrl = "$functionPublicUrl/api/JitAuthentication"
     authenticationConfiguration = @{
         "@odata.type" = "#microsoft.graph.azureAdTokenAuthentication"
         resourceId = "api://$customExtensionAppClientId"
@@ -549,7 +549,7 @@ Invoke-RestMethod -Method Post `
 ### Step 5: Test JIT Flow
 
 ```http
-POST https://your-domain.ngrok.app/api/JitAuthentication
+POST https://your-devtunnel-url.devtunnels.ms/api/JitAuthentication
 Content-Type: application/json
 
 {
@@ -566,20 +566,97 @@ Content-Type: application/json
 
 Expected response (TestMode=true): `{ "data": { "actions": [{ "@odata.type": "microsoft.graph.customAuthenticationExtension.migratePassword" }] } }`
 
-**ngrok web UI** at `http://localhost:4040` — inspect requests, replay errors, filter by path/status.
+**VS Code Ports panel** — view forwarded ports, copy URLs, change visibility. For request inspection, use the Azure Function console output or VS Code debugger.
 
 ### JIT Troubleshooting
 
 | Issue | Solution |
 |-------|---------|
 | **JIT not triggering** | Verify `RequiresMigration = true` and user has random (not real) password. Check listener is created. |
-| **ngrok URL changed** | Use `.\scripts\Configure-ExternalIdJit.ps1` to update, or use ngrok static domain. |
+| **Tunnel URL changed** | Use `.\scripts\Configure-ExternalIdJit.ps1` or `.\scripts\Switch-JitEnvironment.ps1` to update the Custom Authentication Extension. |
 | **Function timeout (2s)** | Set `TimeoutSeconds: 1.5`, `CachePrivateKey: true`, `Retry.MaxRetries: 1`. Target <1500ms p95. |
 | **TestMode in production** | ⚠️ **Security risk** — any password accepted. Set `TestMode=false` immediately. |
 | **User not found** | Check userId in payload, verify user exists in EEID, check app permissions. |
 | **B2C validation failed** | Verify ROPC policy exists (`B2C_1_ROPC`), test B2C login directly via curl, check UPN transformation. |
 
 > **Reference**: `src/B2CMigrationKit.Function/sample/sample.cs` contains a standalone reference implementation showing the raw Custom Authentication Extension contract.
+
+## Native Auth + JIT Migration
+
+### Overview
+
+JIT password migration also works with **Native Authentication APIs** — mobile and desktop apps that call External ID directly via `/initiate` → `/challenge` → `/token` endpoints, without browser redirects.
+
+This is important because many B2C customers use embedded/native sign-in UIs (MSAL native auth, custom HTTP clients) rather than browser-based flows.
+
+### How It Works
+
+```
+Mobile/Desktop App
+  ├─ POST /oauth2/v2.0/initiate  (username, challenge_type=password)
+  ├─ POST /oauth2/v2.0/challenge (continuation_token, challenge_type=password)
+  └─ POST /oauth2/v2.0/token     (continuation_token, grant_type=password, password)
+       │
+       ├─ EEID checks RequiresMigration = true
+       ├─ onPasswordSubmit → Custom Authentication Extension → Azure Function
+       ├─ Function validates password against B2C (ROPC)
+       ├─ MigratePassword → EEID sets password + clears flag
+       └─ Returns tokens to app
+```
+
+The `onPasswordSubmit` event fires for any app included in the event listener — whether the sign-in comes from a browser redirect or Native Auth API call.
+
+### Setup
+
+```powershell
+# 1. Ensure JIT is configured (RSA keys, Function, CAE)
+#    See "JIT Migration Implementation" section above
+
+# 2. Configure Native Auth app + event listener
+.\scripts\Configure-NativeAuthJit.ps1 -TenantId "your-external-id-tenant-id"
+
+# 3. Prepare a test user
+.\scripts\New-TestUser.ps1 -Email "nativetest@yourdomain.com" -SetMigrationFlag true
+
+# 4. Start the Azure Function locally
+cd src\B2CMigrationKit.Function
+.\start-local.ps1
+
+# 5. Run the test
+.\scripts\Test-NativeAuthJit.ps1 `
+    -TenantSubdomain "your-tenant" `
+    -ClientId $env:NATIVE_AUTH_APP_ID `
+    -Username "nativetest@yourdomain.com" `
+    -Password "TempP@ssw0rd!2026" `
+    -SecondSignIn
+```
+
+### Key Configuration Requirements
+
+| Requirement | Details |
+|-------------|---------|
+| App registration | `nativeAuthenticationApisEnabled = "all"`, `isFallbackPublicClient = true` |
+| User flow | Must include `EmailPassword-OAUTH` identity provider |
+| Event listener | Must include the Native Auth app in `includeApplications` |
+| Admin consent | `openid` and `offline_access` delegated permissions |
+
+### Expected Test Results
+
+| Scenario | Expected Outcome |
+|----------|-----------------|
+| First sign-in (RequiresMigration=true) | CAE fires → password migrated → tokens returned |
+| Second sign-in (RequiresMigration=false) | Direct auth → tokens returned (no CAE) |
+| Wrong password + RequiresMigration=true | CAE fires → validation fails → sign-in blocked |
+| App NOT in event listener | Random EEID password doesn't match → sign-in fails |
+
+### Troubleshooting Native Auth
+
+| Issue | Solution |
+|-------|----------|
+| `challenge_type=redirect` returned | App not configured for Native Auth, or user flow missing EmailPassword provider |
+| `invalid_grant` at token endpoint | Password rejected by CAE (check Function logs) |
+| `interaction_required` | User flow requires attributes not provided via Native Auth |
+| Sign-in works but flag not cleared | Function in TestMode doesn't clear flag; set `TestMode=false` for full test |
 
 ## Attribute Mapping
 
